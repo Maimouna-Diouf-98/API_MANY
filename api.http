@@ -1,0 +1,5 @@
+### Test authentifié
+GET http://127.0.0.1:8000/api/transactions
+Accept: application/json
+Authorization: Bearer TON_TOKEN
+X-Many-Client-Id: TON_CLIENT_ID

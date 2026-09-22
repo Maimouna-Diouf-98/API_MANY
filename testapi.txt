@@ -1,0 +1,57 @@
+Sandbox:
+
+
+client_id     : agg_sandbox_nc54Wc3AqIPl
+client_secret : FiPnWzkg8R9eVLLWKYi6sPPpJb1PNDP0LSfP3DrvnO33yYQV
+
+{
+  "client_id":"agg_sandbox_nc54Wc3AqIPl",
+  "client_secret":"FiPnWzkg8R9eVLLWKYi6sPPpJb1PNDP0LSfP3DrvnO33yYQV",
+  "grant_type":"client_credentials"
+}
+
+{
+    "sub_merchant_id": "01a0a056-da52-7274-a175-9587be200ff9",
+    "amount": 25000,
+    "currency": "XOF",
+    "customer_phone": "+221770000001",
+    "order_reference": "CMD-TEST-008",
+    "idempotency_key": "CMD-TEST-008-v1"
+}
+
+
+{
+    "sub_merchant_id": "01a0a056-da52-7274-a175-9587be200ff9",
+    "recipient_phone": "+221770000001",
+    "amount": 15000,
+    "currency": "XOF",
+    "reference": "REMB-2026-002",
+    "idempotency_key": "REMB-2026-005-v1"
+}
+    
+
+{
+    "sub_merchant_id": "01a0a056-da52-7274-a175-9587be200ff9",
+    "label": "Salaires OCTOBRE 2026",
+    "currency": "XOF",
+    "webhook_url": "https://monsite.sn/webhooks/bulk",
+    "recipients": [
+        {
+            "phone": "+221770000002",
+            "amount": 15000,
+            "reference": "SAL-EMP-003"
+        },
+        {
+            "phone": "+221770000003",
+            "amount": 12000,
+            "reference": "SAL-EMP-003"
+        },
+        {
+            "phone": "+221770000004",
+            "amount": 15000,
+            "reference": "SAL-EMP-003"
+        }
+    ]
+}
+ 
+    
