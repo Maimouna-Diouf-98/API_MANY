@@ -211,6 +211,18 @@ class TransactionController extends Controller
                 'status'  => strtoupper($transaction->status),
             ], 409);
         }
+        if ($transaction->created_at->addMinutes(10)->isPast()) {
+    $transaction->update([
+        'status'         => 'failed',
+        'failure_reason' => 'EXPIRED',
+    ]);
+
+    return response()->json([
+        'error'   => 'TRANSACTION_EXPIRED',
+        'message' => 'Cette demande de paiement a expiré.',
+    ], 410);
+}
+        
 
         try {
             $transaction = $this->service->confirmPayment($transaction, $request->mpin);
@@ -250,6 +262,7 @@ public function pendingForCustomer(Request $request, string $phone)
                         [$normalizedPhone]
                     )
                     ->where('status', 'pending')
+                    ->where('created_at', '>=', now()->subMinutes(10))
                     ->whereNotNull('api_type')
                     ->where('api_type', 'COLLECTION')
                     ->latest()

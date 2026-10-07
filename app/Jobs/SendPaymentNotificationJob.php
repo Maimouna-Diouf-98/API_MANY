@@ -2,8 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Domain\Transactions\Models\RealTransaction;
-use App\Domain\SubMerchants\Models\SubMerchant;
+use App\Services\FirebaseNotificationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,103 +18,45 @@ class SendPaymentNotificationJob implements ShouldQueue
     public int $tries = 3;
 
     public function __construct(
-        public RealTransaction $transaction,
-        public object          $customer,
-        public SubMerchant     $subMerchant,
+        public int     $customerId,
+        public string  $transactionId,
+        public string  $amount,
+        public string  $merchantName,
+        public ?string $orderReference = null,
     ) {}
 
     public function handle(): void
     {
-        try {
-            $amount       = number_format($this->transaction->amount, 0, ',', ' ');
-            $merchantName = $this->subMerchant->legal_name;
-            $reference    = $this->transaction->transaction_id;
-            $phone        = $this->transaction->customer_phone;
+        $customer = DB::connection('mysql_money')
+            ->table('users')
+            ->where('id', $this->customerId)
+            ->first(['id', 'fcm_token']);
 
-            // Log pour debug
-            Log::info('PAYMENT_REQUEST', [
-                'transaction_id'  => $reference,
-                'customer_phone'  => $phone,
-                'customer_id'     => $this->customer->id,
-                'amount'          => $amount . ' XOF',
-                'merchant'        => $merchantName,
-                'order_reference' => $this->transaction->order_reference,
-            ]);
+        Log::info('PAYMENT_REQUEST', [
+            'transaction_id' => $this->transactionId,
+            'customer_id'    => $this->customerId,
+            'has_fcm_token'  => !empty($customer?->fcm_token),
+            'amount'         => $this->amount . ' XOF',
+        ]);
 
-            // Stocker l'OTP dans users.otp pour que l'app
-            // mobile money puisse vérifier si nécessaire
-            $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-
-            DB::connection('mysql_money')
-              ->table('users')
-              ->where('id', $this->customer->id)
-              ->update([
-                  'otp'        => $otp,
-                  'updated_at' => now(),
-              ]);
-
-            Log::info("OTP généré pour {$phone}: {$otp} "
-                    . "(transaction: {$reference})");
-
-            // Tenter d'envoyer via FCM si fcm_token disponible
-            if ($this->customer->fcm_token) {
-                $this->sendFcmNotification(
-                    $this->customer->fcm_token,
-                    $amount,
-                    $merchantName,
-                    $reference
-                );
-            } else {
-                Log::warning("Pas de FCM token pour user {$this->customer->id} "
-                           . "— l'app devra faire du polling.");
-            }
-
-        } catch (\Exception $e) {
-            Log::error('SendPaymentNotificationJob Error: ' . $e->getMessage());
-            // Ne pas faire échouer le job définitivement
-            // L'app mobile money peut toujours faire du polling
+        if (!$customer || empty($customer->fcm_token)) {
+            Log::warning('PAYMENT_REQUEST: pas de fcm_token', ['customer_id' => $this->customerId]);
+            return;
         }
-    }
 
-    private function sendFcmNotification(
-        string $fcmToken,
-        string $amount,
-        string $merchantName,
-        string $transactionId
-    ): void {
-        try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Authorization' => 'key=' . env('FIREBASE_SERVER_KEY'),
-                'Content-Type'  => 'application/json',
-            ])->post('https://fcm.googleapis.com/fcm/send', [
-                'to'           => $fcmToken,
-                'notification' => [
-                    'title' => '💳 Demande de paiement Many',
-                    'body'  => "Payer {$amount} XOF à {$merchantName} ?",
-                    'sound' => 'default',
-                    'badge' => 1,
-                ],
-                'data' => [
-                    'type'            => 'PAYMENT_REQUEST',
-                    'transaction_id'  => $transactionId,
-                    'amount'          => $amount,
-                    'merchant_name'   => $merchantName,
-                    'click_action'    => 'FLUTTER_NOTIFICATION_CLICK',
-                ],
-                'priority'             => 'high',
-                'content_available'    => true,
-            ]);
+        $sent = app(FirebaseNotificationService::class)->sendPaymentRequest(
+            $customer->fcm_token,
+            $this->transactionId,
+            $this->amount,          // montant brut : le formatage est fait dans le service
+            $this->merchantName,
+            'XOF',
+            $this->orderReference
+        );
 
-            if ($response->successful()) {
-                Log::info("FCM notification envoyée pour transaction {$transactionId}");
-            } else {
-                Log::warning("FCM error: " . $response->body());
-            }
+        Log::info('FCM payment request result: ' . ($sent ? 'SUCCESS' : 'FAILED'));
 
-        } catch (\Exception $e) {
-            Log::warning("FCM failed: " . $e->getMessage());
-            // On continue même si FCM échoue
-            // L'app peut faire du polling sur /v1/transactions/pending/{phone}
+        if (!$sent) {
+            throw new \RuntimeException('Échec envoi FCM PAYMENT_REQUEST');
         }
     }
 }

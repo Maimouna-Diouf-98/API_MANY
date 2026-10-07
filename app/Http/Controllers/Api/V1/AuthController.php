@@ -12,7 +12,7 @@ class AuthController extends Controller
    public function token(Request $request)
 
 {
-    Log::info('APP_KEY utilisée: ' . substr(config('app.key'), 0, 15));
+
     $request->validate([
         'client_id'     => 'required|string',
         'client_secret' => 'required|string',

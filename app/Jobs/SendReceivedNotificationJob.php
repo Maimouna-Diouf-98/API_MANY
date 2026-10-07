@@ -42,26 +42,13 @@ class SendReceivedNotificationJob implements ShouldQueue
             ]);
 
             // Envoyer notification push au destinataire
-            if ($receiver->fcm_token) {
-                \Illuminate\Support\Facades\Http::withHeaders([
-                    'Authorization' => 'key=' . env('FIREBASE_SERVER_KEY'),
-                    'Content-Type'  => 'application/json',
-                ])->post('https://fcm.googleapis.com/fcm/send', [
-                    'to'           => $receiver->fcm_token,
-                    'notification' => [
-                        'title' => '💰 Argent reçu !',
-                        'body'  => "Vous avez reçu {$amount} XOF sur votre compte Many.",
-                        'sound' => 'default',
-                    ],
-                    'data' => [
-                        'type'            => 'MONEY_RECEIVED',
-                        'disbursement_id' => $this->disbursement->disbursement_id,
-                        'amount'          => $amount,
-                        'click_action'    => 'FLUTTER_NOTIFICATION_CLICK',
-                    ],
-                    'priority' => 'high',
-                ]);
-            }
+           if ($receiver->fcm_token) {
+            app(\App\Services\FirebaseNotificationService::class)->sendMoneyReceived(
+            $receiver->fcm_token,
+          $amount,
+         (string) $this->disbursement->disbursement_id
+    );
+}
 
         } catch (\Exception $e) {
             Log::error('SendReceivedNotificationJob Error: ' . $e->getMessage());

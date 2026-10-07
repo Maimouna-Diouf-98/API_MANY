@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Domain\BulkPayments\Models\BulkPayment;
 use App\Domain\BulkPayments\Models\BulkPaymentRecipient;
 use App\Domain\Auth\Models\Aggregator;
+use App\Services\FirebaseNotificationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -12,7 +13,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
 
 class ProcessBulkPaymentJob implements ShouldQueue
 {
@@ -31,135 +31,132 @@ class ProcessBulkPaymentJob implements ShouldQueue
     {
         $this->bulkPayment->update(['status' => 'PROCESSING']);
 
-        $successCount = 0;
-        $failureCount = 0;
         $dbConnection = $this->environment === 'SANDBOX' ? 'mysql_sandbox' : 'mysql_money';
         $senderId     = $this->aggregator->user_id;
+        $senderName   = $this->aggregator->trade_name ?: $this->aggregator->legal_name;
+
+        // Seulement les PENDING : un retry ne repaie jamais un destinataire déjà payé
         $recipients = BulkPaymentRecipient::on($dbConnection)
-                                   ->where('bulk_id', $this->bulkPayment->bulk_id)
-                                   ->get();
+                        ->where('bulk_id', $this->bulkPayment->bulk_id)
+                        ->where('status', 'PENDING')
+                        ->get();
 
         foreach ($recipients as $recipient) {
             $totalDebit = $recipient->amount + $recipient->many_fee;
 
             try {
-                DB::connection($dbConnection)->transaction(function ()
-                    use ($recipient, $totalDebit, $dbConnection, $senderId, &$successCount, &$failureCount) {
+                $notification = DB::connection($dbConnection)->transaction(
+                    function () use ($recipient, $totalDebit, $dbConnection, $senderId) {
 
-                    // Vérifier solde agrégateur
-                    $aggregatorWallet = DB::connection($dbConnection)
-                                          ->table('wallets')
-                                          ->where('user_id', $senderId)
-                                          ->where('status', 'active')
-                                          ->lockForUpdate()
-                                          ->first();
+                        $aggregatorWallet = DB::connection($dbConnection)
+                            ->table('wallets')
+                            ->where('user_id', $senderId)
+                            ->where('status', 'active')
+                            ->lockForUpdate()
+                            ->first();
 
-                    if (!$aggregatorWallet || $aggregatorWallet->balance < $totalDebit) {
-                        $recipient->update([
-                            'sender_id'      => $senderId,
-                            'status'         => 'FAILED',
-                            'failure_reason' => 'INSUFFICIENT_FUNDS',
-                        ]);
-                        $failureCount++;
-                        return;
-                    }
-
-                    $receiverId = null;
-
-                    // Production : trouver et créditer le destinataire
-                    if ($this->environment === 'PRODUCTION') {
-                        $normalizedPhone = str_replace(' ', '', $recipient->phone);
-
-    $user = DB::connection('mysql_money')
-               ->table('users')
-               ->whereRaw("REPLACE(phone, ' ', '') = ?", [$normalizedPhone])
-               ->whereNull('deleted_at')
-               ->first();
-
-                        if (!$user) {
+                        if (!$aggregatorWallet || $aggregatorWallet->balance < $totalDebit) {
                             $recipient->update([
                                 'sender_id'      => $senderId,
                                 'status'         => 'FAILED',
-                                'failure_reason' => 'RECIPIENT_NOT_FOUND',
+                                'failure_reason' => 'INSUFFICIENT_FUNDS',
                             ]);
-                            $failureCount++;
-                            return;
+                            return null;
                         }
 
-                        $receiverId      = $user->id;
-                        $recipientWallet = DB::connection('mysql_money')
-                                             ->table('wallets')
-                                             ->where('user_id', $receiverId)
-                                             ->where('status', 'active')
-                                             ->lockForUpdate()
-                                             ->first();
+                        $receiverId = null;
+                        $fcmToken   = null;
 
-                        if (!$recipientWallet) {
-                            $recipient->update([
-                                'sender_id'      => $senderId,
-                                'receiver_id'    => $receiverId,
-                                'status'         => 'FAILED',
-                                'failure_reason' => 'RECIPIENT_WALLET_NOT_FOUND',
-                            ]);
-                            $failureCount++;
-                            return;
+                        if ($this->environment === 'PRODUCTION') {
+                            $normalizedPhone = str_replace(' ', '', $recipient->phone);
+
+                            $user = DB::connection('mysql_money')
+                                ->table('users')
+                                ->whereRaw("REPLACE(phone, ' ', '') = ?", [$normalizedPhone])
+                                ->whereNull('deleted_at')
+                                ->first();
+
+                            if (!$user) {
+                                $recipient->update([
+                                    'sender_id'      => $senderId,
+                                    'status'         => 'FAILED',
+                                    'failure_reason' => 'RECIPIENT_NOT_FOUND',
+                                ]);
+                                return null;
+                            }
+
+                            $receiverId = $user->id;
+                            $fcmToken   = $user->fcm_token;
+
+                            $recipientWallet = DB::connection('mysql_money')
+                                ->table('wallets')
+                                ->where('user_id', $receiverId)
+                                ->where('status', 'active')
+                                ->lockForUpdate()
+                                ->first();
+
+                            if (!$recipientWallet) {
+                                $recipient->update([
+                                    'sender_id'      => $senderId,
+                                    'receiver_id'    => $receiverId,
+                                    'status'         => 'FAILED',
+                                    'failure_reason' => 'RECIPIENT_WALLET_NOT_FOUND',
+                                ]);
+                                return null;
+                            }
+
+                            DB::connection('mysql_money')
+                                ->table('wallets')
+                                ->where('user_id', $receiverId)
+                                ->update([
+                                    'balance'             => DB::raw('balance + ' . $recipient->net_amount),
+                                    'last_transaction_at' => now(),
+                                    'version'             => DB::raw('version + 1'),
+                                    'updated_at'          => now(),
+                                ]);
                         }
 
-                        // Créditer destinataire (net_amount)
-                        DB::connection('mysql_money')
-                          ->table('wallets')
-                          ->where('user_id', $receiverId)
-                          ->update([
-                              'balance'             => DB::raw('balance + ' . $recipient->net_amount),
-                              'last_transaction_at' => now(),
-                              'version'             => DB::raw('version + 1'),
-                              'updated_at'          => now(),
-                          ]);
-
-                        // Notifier le destinataire
-                        if ($user->fcm_token) {
-                            $this->notifyRecipient($user->fcm_token, $recipient);
-                        }
-                    }
-
-                    // Débiter agrégateur (sender)
-                    DB::connection($dbConnection)
-                      ->table('wallets')
-                      ->where('user_id', $senderId)
-                      ->update([
-                          'balance'             => DB::raw('balance - ' . $totalDebit),
-                          'last_transaction_at' => now(),
-                          'version'             => DB::raw('version + 1'),
-                          'updated_at'          => now(),
-                      ]);
-
-                    // Créditer Many (many_fee)
-                    $adminWallet = DB::connection($dbConnection)
-                                     ->table('admin_wallets')
-                                     ->lockForUpdate()
-                                     ->first();
-
-                    if ($adminWallet) {
                         DB::connection($dbConnection)
-                          ->table('admin_wallets')
-                          ->where('id', $adminWallet->id)
-                          ->update([
-                              'balance'             => DB::raw('balance + ' . $recipient->many_fee),
-                              'last_transaction_at' => now(),
-                              'version'             => DB::raw('version + 1'),
-                              'updated_at'          => now(),
-                          ]);
+                            ->table('wallets')
+                            ->where('user_id', $senderId)
+                            ->update([
+                                'balance'             => DB::raw('balance - ' . $totalDebit),
+                                'last_transaction_at' => now(),
+                                'version'             => DB::raw('version + 1'),
+                                'updated_at'          => now(),
+                            ]);
+
+                        $adminWallet = DB::connection($dbConnection)
+                            ->table('admin_wallets')
+                            ->lockForUpdate()
+                            ->first();
+
+                        if ($adminWallet) {
+                            DB::connection($dbConnection)
+                                ->table('admin_wallets')
+                                ->where('id', $adminWallet->id)
+                                ->update([
+                                    'balance'             => DB::raw('balance + ' . $recipient->many_fee),
+                                    'last_transaction_at' => now(),
+                                    'version'             => DB::raw('version + 1'),
+                                    'updated_at'          => now(),
+                                ]);
+                        }
+
+                        $recipient->update([
+                            'sender_id'   => $senderId,
+                            'receiver_id' => $receiverId,
+                            'status'      => 'SUCCESS',
+                        ]);
+
+                        // Renvoyé pour être notifié APRÈS le commit
+                        return $fcmToken ? ['token' => $fcmToken] : null;
                     }
+                );
 
-                    // Mettre à jour le recipient
-                    $recipient->update([
-                        'sender_id'   => $senderId,
-                        'receiver_id' => $receiverId,
-                        'status'      => 'SUCCESS',
-                    ]);
-
-                    $successCount++;
-                });
+                if ($notification) {
+                    $this->notifyRecipient($notification['token'], $recipient, $senderName);
+                }
 
             } catch (\Exception $e) {
                 Log::error('BULK recipient error: ' . $e->getMessage());
@@ -168,11 +165,18 @@ class ProcessBulkPaymentJob implements ShouldQueue
                     'status'         => 'FAILED',
                     'failure_reason' => 'PROCESSING_ERROR',
                 ]);
-                $failureCount++;
             }
         }
 
-        // Finaliser le bulk payment
+        // Compteurs recalculés depuis la base (corrects même après un retry)
+        $counts = BulkPaymentRecipient::on($dbConnection)
+            ->where('bulk_id', $this->bulkPayment->bulk_id)
+            ->selectRaw("SUM(status = 'SUCCESS') as ok, SUM(status = 'FAILED') as ko")
+            ->first();
+
+        $successCount = (int) ($counts->ok ?? 0);
+        $failureCount = (int) ($counts->ko ?? 0);
+
         $this->bulkPayment->update([
             'status'        => 'COMPLETED',
             'success_count' => $successCount,
@@ -180,7 +184,6 @@ class ProcessBulkPaymentJob implements ShouldQueue
             'completed_at'  => now(),
         ]);
 
-        // Envoyer webhook à l'agrégateur
         dispatch(new SendWebhookJob(
             $this->bulkPayment,
             $failureCount === 0
@@ -192,30 +195,18 @@ class ProcessBulkPaymentJob implements ShouldQueue
                 . "{$successCount} succès, {$failureCount} échecs");
     }
 
-    private function notifyRecipient(string $fcmToken, BulkPaymentRecipient $recipient): void
+    private function notifyRecipient(string $fcmToken, BulkPaymentRecipient $recipient, string $senderName): void
     {
         try {
-            $amount = number_format($recipient->net_amount, 0, ',', ' ');
-            Http::withHeaders([
-                'Authorization' => 'key=' . env('FIREBASE_SERVER_KEY'),
-                'Content-Type'  => 'application/json',
-            ])->post('https://fcm.googleapis.com/fcm/send', [
-                'to'           => $fcmToken,
-                'notification' => [
-                    'title' => '💰 Argent reçu !',
-                    'body'  => "Vous avez reçu {$amount} XOF sur votre compte Many.",
-                    'sound' => 'default',
-                ],
-                'data' => [
-                    'type'      => 'MONEY_RECEIVED',
-                    'bulk_id'   => $recipient->bulk_id,
-                    'amount'    => $amount,
-                    'reference' => $recipient->reference,
-                ],
-                'priority' => 'high',
-            ]);
-        } catch (\Exception $e) {
-            Log::warning("FCM bulk recipient notification failed: " . $e->getMessage());
+            app(FirebaseNotificationService::class)->sendBulkMoneyReceived(
+                $fcmToken,
+                $recipient->bulk_id,
+                (string) (int) $recipient->net_amount,
+                $senderName,
+                $recipient->reference
+            );
+        } catch (\Throwable $e) {
+            Log::warning('FCM bulk recipient notification failed: ' . $e->getMessage());
         }
     }
 }

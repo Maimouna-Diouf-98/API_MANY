@@ -8,6 +8,7 @@ use App\Domain\BulkPayments\Models\BulkPaymentRecipient;
 use App\Domain\SubMerchants\Models\SubMerchant;
 use App\Domain\Auth\Models\Application;
 use App\Jobs\ProcessBulkPaymentJob;
+use App\Jobs\SendBulkConfirmationNotificationJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -189,14 +190,23 @@ if ($environment === 'PRODUCTION') {
                 aggregator:  $aggregator,
                 environment: 'SANDBOX',
             ))->onConnection('mysql_sandbox');
-        } else {
-            // Production → attendre confirmation mpin
-            Log::info("BulkPayment {$bulkPayment->bulk_id} créé en attente de confirmation", [
-                'aggregator'       => $aggregator->legal_name,
-                'total_recipients' => $bulkPayment->total_recipients,
-                'total_amount'     => $bulkPayment->total_amount . ' XOF',
-            ]);
-        }
+        }else {
+    // Production → attendre confirmation mpin
+    Log::info("BulkPayment {$bulkPayment->bulk_id} créé en attente de confirmation", [
+        'aggregator'       => $aggregator->legal_name,
+        'total_recipients' => $bulkPayment->total_recipients,
+        'total_amount'     => $bulkPayment->total_amount . ' XOF',
+    ]);
+
+    dispatch(new SendBulkConfirmationNotificationJob(
+        userId:          (int) $aggregator->user_id,
+        bulkId:          $bulkPayment->bulk_id,
+        label:           $bulkPayment->label,
+        totalRecipients: (int) $bulkPayment->total_recipients,
+        totalAmount:     (string) $bulkPayment->total_amount,
+        fee:             (string) $bulkPayment->many_fee,
+    ));
+}
 
         return response()->json([
             'bulk_id'          => $bulkPayment->bulk_id,
@@ -215,77 +225,102 @@ if ($environment === 'PRODUCTION') {
         ], 202);
     }
 
-    public function confirm(Request $request, string $bulkId)
-    {
-        $request->validate([
-            'mpin' => 'required|string',
-        ]);
+ public function confirm(Request $request, string $bulkId)
+{
+    $request->validate(['mpin' => 'required|string']);
 
-        $aggregator  = $request->authenticated_aggregator;
-        $environment = $request->environment ?? 'SANDBOX';
+    $aggregator  = $request->authenticated_aggregator;
+    $environment = $request->environment ?? 'SANDBOX';
 
-        $bulkPayment = BulkPayment::where('bulk_id', $bulkId)
-                                   ->where('aggregator_id', $aggregator->id)
-                                   ->first();
-
-        if (!$bulkPayment) {
-            return response()->json([
-                'error'   => 'BULK_PAYMENT_NOT_FOUND',
-                'message' => 'Paiement de masse introuvable.',
-            ], 404);
-        }
-
-        if ($bulkPayment->status !== 'PENDING') {
-            return response()->json([
-                'error'   => 'BULK_PAYMENT_ALREADY_PROCESSED',
-                'message' => 'Ce paiement de masse a déjà été traité.',
-                'status'  => $bulkPayment->status,
-            ], 409);
-        }
-
-        // Vérifier mpin de l'agrégateur
-        $aggregatorUser = DB::connection('mysql_money')
-                            ->table('users')
-                            ->where('id', $aggregator->user_id)
-                            ->first();
-
-        if (!$aggregatorUser) {
-            return response()->json([
-                'error'   => 'AGGREGATOR_USER_NOT_FOUND',
-                'message' => 'Utilisateur agrégateur introuvable.',
-            ], 404);
-        }
-
-        if (!$aggregatorUser->mpin) {
-            return response()->json([
-                'error'   => 'AGGREGATOR_MPIN_NOT_SET',
-                'message' => 'PIN non configuré. Contactez Many.',
-            ], 422);
-        }
-
-        if (!Hash::check($request->mpin, $aggregatorUser->mpin)) {
-            return response()->json([
-                'error'   => 'INVALID_MPIN',
-                'message' => 'PIN incorrect.',
-            ], 401);
-        }
-
-        // Mpin valide → confirmer et dispatcher
-        $bulkPayment->update(['confirmed_at' => now()]);
-
-        dispatch(new ProcessBulkPaymentJob(
-            bulkPayment: $bulkPayment,
-            aggregator:  $aggregator,
-            environment: 'PRODUCTION',
-        ))->onConnection('mysql_money');
-
+    // La confirmation par PIN n'existe qu'en production
+    if ($environment !== 'PRODUCTION') {
         return response()->json([
-            'bulk_id'          => $bulkPayment->bulk_id,
-            'status'           => 'PROCESSING',
-            'total_recipients' => $bulkPayment->total_recipients,
-            'message'          => 'Paiement de masse confirmé. Traitement en cours.',
-        ]);
+            'error'   => 'CONFIRMATION_NOT_REQUIRED',
+            'message' => 'La confirmation n\'est requise qu\'en production.',
+        ], 422);
     }
+
+    $bulkPayment = BulkPayment::where('bulk_id', $bulkId)
+                               ->where('aggregator_id', $aggregator->id)
+                               ->first();
+
+    if (!$bulkPayment) {
+        return response()->json([
+            'error'   => 'BULK_PAYMENT_NOT_FOUND',
+            'message' => 'Paiement de masse introuvable.',
+        ], 404);
+    }
+
+    if ($bulkPayment->status !== 'PENDING') {
+        return response()->json([
+            'error'   => 'BULK_PAYMENT_ALREADY_PROCESSED',
+            'message' => 'Ce paiement de masse a déjà été traité.',
+            'status'  => $bulkPayment->status,
+        ], 409);
+    }
+
+    // Expiration : 10 minutes après la création
+    if ($bulkPayment->created_at->addMinutes(10)->isPast()) {
+        return response()->json([
+            'error'   => 'BULK_PAYMENT_EXPIRED',
+            'message' => 'Ce paiement de masse a expiré. Créez-en un nouveau.',
+        ], 410);
+    }
+
+    $aggregatorUser = DB::connection('mysql_money')
+                        ->table('users')
+                        ->where('id', $aggregator->user_id)
+                        ->first(['id', 'mpin']);
+
+    if (!$aggregatorUser) {
+        return response()->json([
+            'error'   => 'AGGREGATOR_USER_NOT_FOUND',
+            'message' => 'Utilisateur agrégateur introuvable.',
+        ], 404);
+    }
+
+    if (!$aggregatorUser->mpin) {
+        return response()->json([
+            'error'   => 'AGGREGATOR_MPIN_NOT_SET',
+            'message' => 'PIN non configuré. Contactez Many.',
+        ], 422);
+    }
+
+    if (!Hash::check($request->mpin, $aggregatorUser->mpin)) {
+        return response()->json([
+            'error'   => 'INVALID_MPIN',
+            'message' => 'PIN incorrect.',
+        ], 401);
+    }
+
+    // Réservation atomique : un seul appel peut passer de PENDING à PROCESSING
+    $claimed = BulkPayment::where('bulk_id', $bulkId)
+                          ->where('aggregator_id', $aggregator->id)
+                          ->where('status', 'PENDING')
+                          ->update(['status' => 'PROCESSING', 'confirmed_at' => now()]);
+
+    if (!$claimed) {
+        return response()->json([
+            'error'   => 'BULK_PAYMENT_ALREADY_PROCESSED',
+            'message' => 'Ce paiement de masse est déjà en cours de traitement.',
+        ], 409);
+    }
+
+    $bulkPayment->refresh();
+
+    dispatch(new ProcessBulkPaymentJob(
+        bulkPayment: $bulkPayment,
+        aggregator:  $aggregator,
+        environment: 'PRODUCTION',
+    ))->onConnection('mysql_money');
+
+    return response()->json([
+        'bulk_id'          => $bulkPayment->bulk_id,
+        'status'           => 'PROCESSING',
+        'total_recipients' => $bulkPayment->total_recipients,
+        'message'          => 'Paiement de masse confirmé. Traitement en cours.',
+    ]);
+}
 
     public function show(Request $request, string $bulkId)
     {

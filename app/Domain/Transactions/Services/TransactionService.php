@@ -11,6 +11,8 @@ use App\Jobs\SendWebhookJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
+use App\Jobs\SendPaymentNotificationJob;
 
 class TransactionService
 {
@@ -120,7 +122,12 @@ class TransactionService
     'transaction_time'  => now()->format('h:i A'),
     'transaction_mode'  => 'normal',
 ]);
-
+dispatch(new SendPaymentNotificationJob(
+    customerId:   (int) $customer->id,
+    transactionId: $transaction->transaction_id,
+    amount:       (string) $transaction->amount,
+    merchantName: $subMerchant->legal_name ?? 'Marchand',
+));
         return [
             'transaction' => $transaction,
             'qr_code'     => $this->generateQrCode($transaction),
@@ -179,22 +186,54 @@ class TransactionService
         return $transaction;
     }
 
-   private function generateQrCode(Transaction|RealTransaction $transaction): string
+private function generateQrCode(Transaction|RealTransaction $transaction): string
 {
+    // Garde : une transaction sans agrégateur ne doit pas produire de QR
+    if (!$transaction->aggregator_id) {
+        throw new \DomainException('Transaction sans agrégateur : QR impossible.');
+    }
+
+    // RealTransaction => 'mysql_money', Transaction => connexion par défaut
+    $conn = $transaction->getConnectionName() ?? config('database.default');
+
+    $aggregator = Aggregator::on($conn)->find($transaction->aggregator_id);
+
+    $user = $aggregator?->user_id
+        ? DB::connection($conn)->table('users')
+            ->where('id', $aggregator->user_id)
+            ->first(['id', 'role', 'first_name', 'last_name', 'phone'])
+        : null;
+
+    if (!$user) {
+        throw new \DomainException('Utilisateur de l\'agrégateur introuvable : QR impossible.');
+    }
+
+    $expiresAt = $transaction instanceof Transaction && $transaction->confirmation_expires_at
+        ? $transaction->confirmation_expires_at->timestamp
+        : now()->addMinutes(10)->timestamp;
+
     $payload = json_encode([
+        // champs existants : inchangés
         'type'            => 'MANY_PAYMENT',
         'transaction_id'  => $transaction->transaction_id,
         'amount'          => $transaction->amount,
         'currency'        => $transaction->currency,
         'sub_merchant_id' => $transaction->sub_merchant_id,
-        'expires_at'      => now()->addMinutes(10)->timestamp,
+        'expires_at'      => $expiresAt,
+
+        // champs ajoutés pour la compatibilité avec l'app
+        'user_id'         => (int) $user->id,
+        'name'            => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+        'phone'           => $user->phone ?? $aggregator->phone,
+        'user_type'       => $user->role,
     ]);
 
-    $qrCode = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')
-                ->size(300)
-                ->errorCorrection('H')
-                ->generate($payload);
 
+    $qrCode = QrCode::format('svg')
+       ->size(350)
+       ->margin(2)
+       ->errorCorrection('M')
+       ->generate($payload);
     return base64_encode($qrCode);
 }
 }
