@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
 use App\Domain\Auth\Models\Application;
+use App\Domain\Auth\Models\ProductionRequest;
 use App\Domain\SubMerchants\Models\SubMerchant;
 use App\Domain\Transactions\Models\Transaction;
 use App\Domain\Disbursements\Models\Disbursement;
-use Illuminate\Support\Facades\DB;
 use App\Domain\BulkPayments\Models\BulkPayment;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
@@ -19,6 +21,7 @@ class DashboardController extends Controller
         $applicationIds = Application::where('aggregator_id', $aggregator->id)
                                      ->pluck('id');
 
+        // Applications et sous-marchands
         $totalApplications = Application::where('aggregator_id', $aggregator->id)
                                         ->where('is_active', true)
                                         ->count();
@@ -28,9 +31,9 @@ class DashboardController extends Controller
                                         ->count();
 
         // Collections
-        $totalTransactions = Transaction::where('aggregator_id', $aggregator->id)
-                                        ->where('status', 'SUCCESS')
-                                        ->count();
+        $totalCollections = Transaction::where('aggregator_id', $aggregator->id)
+                                       ->where('status', 'SUCCESS')
+                                       ->count();
 
         $totalVolume = Transaction::where('aggregator_id', $aggregator->id)
                                   ->where('status', 'SUCCESS')
@@ -44,8 +47,17 @@ class DashboardController extends Controller
         $totalDisbursed = Disbursement::where('aggregator_id', $aggregator->id)
                                       ->where('status', 'SUCCESS')
                                       ->sum('amount');
-  
-                    
+
+        // Bulk payments
+        $totalBulk       = BulkPayment::where('aggregator_id', $aggregator->id)
+                                       ->where('status', 'COMPLETED')
+                                       ->count();
+
+        $totalBulkAmount = BulkPayment::where('aggregator_id', $aggregator->id)
+                                      ->where('status', 'COMPLETED')
+                                      ->sum('total_amount');
+
+        $totalDecaisse = $totalDisbursed + $totalBulkAmount;
 
         // Balance wallet
         $wallet = null;
@@ -56,83 +68,95 @@ class DashboardController extends Controller
                         ->first();
         }
 
-        $balance = $wallet ? $wallet->balance : 0;
+        $balance = $wallet ? (float) $wallet->balance : 0;
 
-// Transactions récentes (collections + disbursements + bulk)
-$recentCollections = Transaction::where('aggregator_id', $aggregator->id)
-    ->latest()
-    ->take(5)
-    ->get()
-    ->map(fn($t) => [
-        'type'       => 'COLLECTION',
-        'id'         => $t->transaction_id,
-        'reference'  => $t->order_reference,
-        'amount'     => $t->amount,
-        'net'        => $t->net_to_aggregator,
-        'status'     => $t->status,
-        'created_at' => $t->created_at,
-    ]);
+        // Transactions récentes (7 derniers jours)
+        $recentTransactions = Transaction::where('aggregator_id', $aggregator->id)
+                                         ->latest()
+                                         ->take(5)
+                                         ->get();
 
-$recentDisbursements = Disbursement::where('aggregator_id', $aggregator->id)
-    ->latest()
-    ->take(5)
-    ->get()
-    ->map(fn($d) => [
-        'type'       => 'DISBURSEMENT',
-        'id'         => $d->disbursement_id,
-        'reference'  => $d->reference,
-        'amount'     => $d->amount,
-        'net'        => $d->net_amount,
-        'status'     => $d->status,
-        'created_at' => $d->created_at,
-    ]);
+        // Données graphique collections (7 derniers jours)
+        $chartData = $this->getChartData($aggregator->id);
 
-$recentBulkPayments = BulkPayment::where('aggregator_id', $aggregator->id)
-    ->latest()
-    ->take(5)
-    ->get()
-    ->map(fn($b) => [
-        'type'       => 'BULK_PAYMENT',
-        'id'         => $b->bulk_id,
-        'reference'  => $b->label,
-        'amount'     => $b->total_amount,
-        'net'        => $b->total_amount - $b->many_fee,
-        'status'     => $b->status,
-        'created_at' => $b->created_at,
-    ]);
-
-$recentTransactions = $recentCollections
-    ->concat($recentDisbursements)
-    ->concat($recentBulkPayments)
-    ->sortByDesc('created_at')
-    ->take(5)
-    ->values();
-
-        $applications = Application::where('aggregator_id', $aggregator->id)
-                                   ->withCount('subMerchants')
-                                   ->latest()
-                                   ->take(5)
-                                   ->get();
-        $totalBulk       = BulkPayment::where('aggregator_id', $aggregator->id)
-                               ->where('status', 'COMPLETED')->count();
-        $totalBulkAmount = BulkPayment::where('aggregator_id', $aggregator->id)
-                               ->where('status', 'COMPLETED')->sum('total_amount');
-        $totalDecaisse   = $totalDisbursed + $totalBulkAmount;
+        // Statut de la demande de production
+        $productionRequest = ProductionRequest::where('aggregator_id', $aggregator->id)
+                                              ->latest()
+                                              ->first();
 
         return view('portal.dashboard.index', compact(
             'aggregator',
             'totalApplications',
             'totalSubMerchants',
-            'totalTransactions',
+            'totalCollections',
             'totalVolume',
             'totalDisbursements',
             'totalDisbursed',
-            'balance',
-            'recentTransactions',
-            'applications',
             'totalBulk',
             'totalBulkAmount',
             'totalDecaisse',
+            'balance',
+            'recentTransactions',
+            'chartData',
+            'productionRequest',
         ));
+    }
+
+    private function getChartData(string $aggregatorId): array
+    {
+        $days = collect(range(6, 0))->map(fn($i) => now()->subDays($i)->format('Y-m-d'));
+
+        $collections = Transaction::where('aggregator_id', $aggregatorId)
+                                   ->where('status', 'SUCCESS')
+                                   ->where('created_at', '>=', now()->subDays(6)->startOfDay())
+                                   ->selectRaw('DATE(created_at) as date, SUM(amount) as total, COUNT(*) as count')
+                                   ->groupBy('date')
+                                   ->pluck('total', 'date');
+
+        $disbursements = Disbursement::where('aggregator_id', $aggregatorId)
+                                      ->where('status', 'SUCCESS')
+                                      ->where('created_at', '>=', now()->subDays(6)->startOfDay())
+                                      ->selectRaw('DATE(created_at) as date, SUM(amount) as total')
+                                      ->groupBy('date')
+                                      ->pluck('total', 'date');
+
+        return [
+            'labels'       => $days->map(fn($d) => \Carbon\Carbon::parse($d)->format('d/m'))->values()->toArray(),
+            'collections'  => $days->map(fn($d) => (float) ($collections[$d] ?? 0))->values()->toArray(),
+            'disbursements'=> $days->map(fn($d) => (float) ($disbursements[$d] ?? 0))->values()->toArray(),
+        ];
+    }
+
+    public function requestProduction(Request $request)
+    {
+        $aggregator = auth('aggregator')->user();
+
+        // Vérifier si une demande est déjà en cours
+        $existing = ProductionRequest::where('aggregator_id', $aggregator->id)
+                                     ->where('status', 'PENDING')
+                                     ->first();
+
+        if ($existing) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Une demande est déjà en cours de traitement.',
+            ], 409);
+        }
+
+        // Créer la demande
+        ProductionRequest::create([
+            'aggregator_id' => $aggregator->id,
+            'status'        => 'PENDING',
+            'message'       => $request->message ?? null,
+        ]);
+
+        // Envoyer email à l'admin Many
+        \Illuminate\Support\Facades\Mail::to(config('mail.admin_email', 'admin@many.sn'))
+            ->send(new \App\Mail\ProductionRequestMail($aggregator));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Demande envoyée. L\'équipe Many vous contactera par email.',
+        ]);
     }
 }

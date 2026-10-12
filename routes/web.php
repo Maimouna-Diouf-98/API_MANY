@@ -28,6 +28,9 @@ Route::middleware('auth:aggregator')->group(function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])
          ->name('dashboard');
+     Route::post('/dashboard/request-production',
+         [DashboardController::class, 'requestProduction'])
+         ->name('dashboard.request.production');
 
     // Applications
     Route::get('/applications', [ApplicationController::class, 'index'])
