@@ -12,11 +12,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->redirectGuestsTo(fn () => route('portal.login'));
+
         $middleware->alias([
-        'resolve.env'    => \App\Http\Middleware\ResolveEnvironmentConnection::class,
-        'verify.bearer'  => \App\Http\Middleware\VerifyBearerToken::class,
-        'verify.hmac'    => \App\Http\Middleware\VerifyHmacSignature::class,
-    ]);
+            'resolve.env'    => \App\Http\Middleware\ResolveEnvironmentConnection::class,
+            'verify.bearer'  => \App\Http\Middleware\VerifyBearerToken::class,
+            'verify.hmac'    => \App\Http\Middleware\VerifyHmacSignature::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

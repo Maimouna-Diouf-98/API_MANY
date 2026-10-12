@@ -81,5 +81,6 @@ Route::middleware('auth:aggregator')->group(function () {
          ->middleware('auth:aggregator');
 });
 
-// Redirection page d'accueil
+// Redirection page d'accueil et alias de secours pour la route login
 Route::get('/', fn() => redirect()->route('portal.login'));
+Route::get('/login', fn() => redirect()->route('portal.login'))->name('login');
