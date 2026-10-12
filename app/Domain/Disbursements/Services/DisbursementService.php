@@ -26,8 +26,8 @@ class DisbursementService
         }
 
         $manyFee    = (int) round($data['amount'] * self::MANY_FEE_RATE);
-        $netAmount  = $data['amount'] - $manyFee;
-        $totalDebit = $data['amount'] + $manyFee;
+        $netAmount  = $data['amount'];              // le destinataire reçoit le montant entier
+        $totalDebit = $data['amount'] + $manyFee;   // l'agrégateur paie montant + commission
 
         // Vérifier solde agrégateur AVANT de créer
         $dbConnection = $environment === 'SANDBOX' ? 'mysql_sandbox' : 'mysql_money';
@@ -103,45 +103,56 @@ class DisbursementService
         return $disbursement;
     }
 
-    public function confirmDisbursement(
-        Disbursement $disbursement,
-        string       $mpin,
-        Aggregator   $aggregator
-    ): Disbursement {
+public function confirmDisbursement(
+    Disbursement $disbursement,
+    string       $mpin,
+    Aggregator   $aggregator
+): Disbursement {
 
-        // Vérifier que le disbursement est PENDING
-        if ($disbursement->status !== 'PENDING') {
-            throw new \Exception('DISBURSEMENT_ALREADY_PROCESSED');
-        }
-
-        // Vérifier le mpin de l'agrégateur via son user_id
-        $aggregatorUser = DB::connection('mysql_money')
-                            ->table('users')
-                            ->where('id', $aggregator->user_id)
-                            ->first();
-
-        if (!$aggregatorUser) {
-            throw new \Exception('AGGREGATOR_USER_NOT_FOUND');
-        }
-
-        if (!$aggregatorUser->mpin) {
-            throw new \Exception('AGGREGATOR_MPIN_NOT_SET');
-        }
-
-        if (!\Illuminate\Support\Facades\Hash::check($mpin, $aggregatorUser->mpin)) {
-            throw new \Exception('INVALID_MPIN');
-        }
-
-        // Marquer comme confirmé
-        $disbursement->update(['confirmed_at' => now()]);
-
-        // Dispatcher le job de traitement production
-        dispatch(new ProcessDisbursementJob(
-            disbursement: $disbursement,
-            environment:  'PRODUCTION',
-            aggregator:   $aggregator,
-        ))->onConnection('mysql_money');
-
-        return $disbursement;
+    if ($disbursement->status !== 'PENDING' || $disbursement->confirmed_at) {
+        throw new \Exception('DISBURSEMENT_ALREADY_PROCESSED');
     }
+
+    // Expiration : 10 minutes
+    if ($disbursement->created_at->addMinutes(10)->isPast()) {
+        throw new \Exception('DISBURSEMENT_EXPIRED');
+    }
+
+    $aggregatorUser = DB::connection('mysql_money')
+                        ->table('users')
+                        ->where('id', $aggregator->user_id)
+                        ->first(['id', 'mpin']);
+
+    if (!$aggregatorUser) {
+        throw new \Exception('AGGREGATOR_USER_NOT_FOUND');
+    }
+
+    if (!$aggregatorUser->mpin) {
+        throw new \Exception('AGGREGATOR_MPIN_NOT_SET');
+    }
+
+    if (!\Illuminate\Support\Facades\Hash::check($mpin, $aggregatorUser->mpin)) {
+        throw new \Exception('INVALID_MPIN');
+    }
+
+    // Verrou atomique : un seul appel peut remplir confirmed_at
+    $claimed = Disbursement::where('id', $disbursement->id)
+                           ->where('status', 'PENDING')
+                           ->whereNull('confirmed_at')
+                           ->update(['confirmed_at' => now()]);
+
+    if (!$claimed) {
+        throw new \Exception('DISBURSEMENT_ALREADY_PROCESSED');
+    }
+
+    $disbursement->refresh();
+
+    dispatch(new ProcessDisbursementJob(
+        disbursement: $disbursement,
+        environment:  'PRODUCTION',
+        aggregator:   $aggregator,
+    ))->onConnection('mysql_money');
+
+    return $disbursement;
+}
 }

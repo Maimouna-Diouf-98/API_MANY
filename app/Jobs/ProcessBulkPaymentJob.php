@@ -29,6 +29,12 @@ class ProcessBulkPaymentJob implements ShouldQueue
 
     public function handle(): void
     {
+        // Ne jamais retraiter un bulk déjà terminé (retry / double dispatch)
+        $this->bulkPayment->refresh();
+        if (in_array($this->bulkPayment->status, ['COMPLETED', 'FAILED'])) {
+            return;
+        }
+
         $this->bulkPayment->update(['status' => 'PROCESSING']);
 
         $dbConnection = $this->environment === 'SANDBOX' ? 'mysql_sandbox' : 'mysql_money';
@@ -37,12 +43,13 @@ class ProcessBulkPaymentJob implements ShouldQueue
 
         // Seulement les PENDING : un retry ne repaie jamais un destinataire déjà payé
         $recipients = BulkPaymentRecipient::on($dbConnection)
-                        ->where('bulk_id', $this->bulkPayment->bulk_id)
-                        ->where('status', 'PENDING')
-                        ->get();
+            ->where('bulk_id', $this->bulkPayment->bulk_id)
+            ->where('status', 'PENDING')
+            ->get();
 
         foreach ($recipients as $recipient) {
-            $totalDebit = $recipient->amount + $recipient->many_fee;
+            $totalDebit   = $recipient->amount + $recipient->many_fee;
+            $notification = null;
 
             try {
                 $notification = DB::connection($dbConnection)->transaction(
@@ -153,18 +160,25 @@ class ProcessBulkPaymentJob implements ShouldQueue
                         return $fcmToken ? ['token' => $fcmToken] : null;
                     }
                 );
-
-                if ($notification) {
-                    $this->notifyRecipient($notification['token'], $recipient, $senderName);
-                }
-
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
+                // La transaction est annulée : on relit la ligne puis on la marque FAILED
                 Log::error('BULK recipient error: ' . $e->getMessage());
-                $recipient->update([
-                    'sender_id'      => $senderId,
-                    'status'         => 'FAILED',
-                    'failure_reason' => 'PROCESSING_ERROR',
-                ]);
+
+                BulkPaymentRecipient::on($dbConnection)
+                    ->where('id', $recipient->id)
+                    ->where('status', 'PENDING')
+                    ->update([
+                        'sender_id'      => $senderId,
+                        'status'         => 'FAILED',
+                        'failure_reason' => 'PROCESSING_ERROR',
+                    ]);
+
+                continue;
+            }
+
+            // Hors du try : une erreur de notification ne change jamais le statut du paiement
+            if ($notification) {
+                $this->notifyRecipient($notification['token'], $recipient, $senderName);
             }
         }
 
@@ -193,6 +207,12 @@ class ProcessBulkPaymentJob implements ShouldQueue
 
         Log::info("BulkPayment {$this->bulkPayment->bulk_id} terminé : "
                 . "{$successCount} succès, {$failureCount} échecs");
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error("BulkPayment {$this->bulkPayment->bulk_id} échec définitif : " . $e->getMessage());
+        $this->bulkPayment->update(['status' => 'FAILED']);
     }
 
     private function notifyRecipient(string $fcmToken, BulkPaymentRecipient $recipient, string $senderName): void

@@ -178,12 +178,13 @@ class DisbursementController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            $errorMap = [
-                'DISBURSEMENT_ALREADY_PROCESSED' => ['code' => 'DISBURSEMENT_ALREADY_PROCESSED', 'message' => 'Ce disbursement a déjà été traité.',  'status' => 409],
-                'AGGREGATOR_USER_NOT_FOUND'      => ['code' => 'AGGREGATOR_USER_NOT_FOUND',      'message' => 'Utilisateur agrégateur introuvable.', 'status' => 404],
-                'AGGREGATOR_MPIN_NOT_SET'        => ['code' => 'AGGREGATOR_MPIN_NOT_SET',        'message' => 'PIN non configuré.',                  'status' => 422],
-                'INVALID_MPIN'                   => ['code' => 'INVALID_MPIN',                   'message' => 'PIN incorrect.',                       'status' => 401],
-            ];
+           $errorMap = [
+               'DISBURSEMENT_ALREADY_PROCESSED' => ['code' => 'DISBURSEMENT_ALREADY_PROCESSED', 'message' => 'Ce disbursement a déjà été traité.',  'status' => 409],
+               'DISBURSEMENT_EXPIRED'           => ['code' => 'DISBURSEMENT_EXPIRED',           'message' => 'Ce décaissement a expiré.',            'status' => 410],
+               'AGGREGATOR_USER_NOT_FOUND'      => ['code' => 'AGGREGATOR_USER_NOT_FOUND',      'message' => 'Utilisateur agrégateur introuvable.', 'status' => 404],
+               'AGGREGATOR_MPIN_NOT_SET'        => ['code' => 'AGGREGATOR_MPIN_NOT_SET',        'message' => 'PIN non configuré.',                  'status' => 422],
+               'INVALID_MPIN'                   => ['code' => 'INVALID_MPIN',                   'message' => 'PIN incorrect.',                       'status' => 401],
+           ];
 
             $error = $errorMap[$e->getMessage()] ?? [
                 'code'    => 'INTERNAL_ERROR',
