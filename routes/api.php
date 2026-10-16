@@ -16,6 +16,8 @@ Route::prefix('v1')->middleware(['resolve.env'])->group(function () {
 // Routes protégées token seulement (lecture)
 Route::prefix('v1')->middleware(['resolve.env', 'verify.bearer'])->group(function () {
     Route::get('/balance', [BalanceController::class, 'show']);
+    Route::post('/device/register', [\App\Http\Controllers\Api\V1\DeviceController::class, 'register']);
+
 
     Route::get('/sub-merchants',      [SubMerchantController::class, 'index']);
     Route::get('/sub-merchants/{id}', [SubMerchantController::class, 'show']);

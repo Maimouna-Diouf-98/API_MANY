@@ -99,7 +99,10 @@ class ProcessDisbursementJob implements ShouldQueue
     }
 
     private function processProduction(): void
-    {
+    {    $this->disbursement->refresh();
+         if ($this->disbursement->status !== 'PENDING') {
+             return;
+         }
         try {
             DB::connection('mysql_money')->transaction(function () {
 
@@ -131,7 +134,7 @@ class ProcessDisbursementJob implements ShouldQueue
                     // Chercher par phone si receiver_id pas encore défini
                     $recipient = DB::connection('mysql_money')
                                    ->table('users')
-                                   ->where('phone', $this->disbursement->recipient_phone)
+                                   ->whereRaw("REPLACE(phone, ' ', '') = ?", [str_replace(' ', '', $this->disbursement->recipient_phone)])
                                    ->whereNull('deleted_at')
                                    ->first();
 
