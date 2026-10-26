@@ -15,6 +15,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(fn () => route('portal.login'));
 
+        $middleware->validateCsrfTokens(except: [
+            'test-pos/*',
+        ]);
+
         $middleware->alias([
             'resolve.env'    => \App\Http\Middleware\ResolveEnvironmentConnection::class,
             'verify.bearer'  => \App\Http\Middleware\VerifyBearerToken::class,

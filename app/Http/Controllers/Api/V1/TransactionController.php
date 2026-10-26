@@ -226,11 +226,12 @@ class TransactionController extends Controller
 
         try {
             $transaction = $this->service->confirmPayment($transaction, $request->mpin);
+            $freshStatus = strtoupper($transaction->fresh()?->status ?? 'PROCESSING');
 
             return response()->json([
                 'transaction_id' => $transaction->transaction_id,
-                'status'         => 'PROCESSING',
-                'message'        => 'Paiement en cours de traitement.',
+                'status'         => $freshStatus,
+                'message'        => $freshStatus === 'SUCCESS' ? 'Paiement confirmé avec succès !' : 'Paiement en cours de traitement.',
             ]);
 
         } catch (\Exception $e) {

@@ -86,3 +86,46 @@ Route::middleware('auth:aggregator')->group(function () {
 
 // Redirection page d'accueil et alias de secours pour la route login
 Route::get('/', fn() => redirect()->route('portal.login'));
+
+// ─── Test POS / Paiement Marchand pour l'Application Mobile ───
+Route::post('/test-pos/create', function (\Illuminate\Http\Request $request) {
+    \Illuminate\Support\Facades\DB::setDefaultConnection('mysql_money');
+    $aggregator = \App\Domain\Auth\Models\Aggregator::on('mysql_money')->first();
+    $subMerchant = \App\Domain\SubMerchants\Models\SubMerchant::on('mysql_money')->first();
+
+    if (!$aggregator || !$subMerchant) {
+        return response()->json(['error' => 'Marchand ou agrégateur introuvable.'], 500);
+    }
+
+    $amount = (int) $request->input('amount', 5000);
+    $phone = (string) $request->input('phone', '+221774874628');
+    $ref = $request->input('order_reference') ?: ('CMD-' . rand(1000, 9999));
+
+    $service = app(\App\Domain\Transactions\Services\TransactionService::class);
+    $result = $service->collection([
+        'sub_merchant_id' => $subMerchant->id,
+        'amount'          => $amount,
+        'currency'        => 'XOF',
+        'customer_phone'  => $phone,
+        'order_reference' => $ref,
+    ], $aggregator, 'PRODUCTION');
+
+    return response()->json([
+        'transaction_id'  => $result['transaction']->transaction_id,
+        'order_reference' => $ref,
+        'merchant_name'   => $subMerchant->legal_name ?? 'Maya Store SARL',
+        'amount'          => $amount,
+        'currency'        => 'XOF',
+        'qr_code'         => $result['qr_code'],
+        'status'          => strtoupper($result['transaction']->status),
+    ]);
+});
+
+Route::get('/test-pos/status/{id}', function (string $id) {
+    $tx = \App\Domain\Transactions\Models\RealTransaction::where('transaction_id', $id)->first();
+    return response()->json([
+        'transaction_id' => $id,
+        'status'         => strtoupper($tx?->status ?? 'NOT_FOUND'),
+        'updated_at'     => $tx?->updated_at,
+    ]);
+});

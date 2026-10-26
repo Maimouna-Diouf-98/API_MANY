@@ -44,19 +44,19 @@ class SendPaymentNotificationJob implements ShouldQueue
             return;
         }
 
-        $sent = app(FirebaseNotificationService::class)->sendPaymentRequest(
-            $customer->fcm_token,
-            $this->transactionId,
-            $this->amount,          // montant brut : le formatage est fait dans le service
-            $this->merchantName,
-            'XOF',
-            $this->orderReference
-        );
+        try {
+            $sent = app(FirebaseNotificationService::class)->sendPaymentRequest(
+                $customer->fcm_token,
+                $this->transactionId,
+                $this->amount,          // montant brut : le formatage est fait dans le service
+                $this->merchantName,
+                'XOF',
+                $this->orderReference
+            );
 
-        Log::info('FCM payment request result: ' . ($sent ? 'SUCCESS' : 'FAILED'));
-
-        if (!$sent) {
-            throw new \RuntimeException('Échec envoi FCM PAYMENT_REQUEST');
+            Log::info('FCM payment request result: ' . ($sent ? 'SUCCESS' : 'FAILED'));
+        } catch (\Throwable $e) {
+            Log::warning('FCM payment request error: ' . $e->getMessage());
         }
     }
 }

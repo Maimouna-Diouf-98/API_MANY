@@ -108,9 +108,13 @@ class ProcessTransactionJob implements ShouldQueue
                     'status'       => 'SUCCESS',
                     'completed_at' => now(),
                 ]);
-
-                dispatch(new SendWebhookJob($this->transaction, 'transaction.succeeded'));
             });
+
+            try {
+                dispatch(new SendWebhookJob($this->transaction, 'transaction.succeeded'));
+            } catch (\Throwable $we) {
+                Log::warning('SendWebhookJob sandbox error: ' . $we->getMessage());
+            }
 
         } catch (\Exception $e) {
             Log::error('SANDBOX Transaction Error: ' . $e->getMessage());
@@ -121,7 +125,8 @@ class ProcessTransactionJob implements ShouldQueue
     private function processProduction(): void
     {
         try {
-            DB::connection('mysql_money')->transaction(function () {
+            $isSuccess = false;
+            DB::connection('mysql_money')->transaction(function () use (&$isSuccess) {
 
                 $customerWallet = DB::connection('mysql_money')
                                     ->table('wallets')
@@ -179,10 +184,17 @@ if ($this->aggregator->user_id) {
                     'status'     => 'success',
                     'updated_at' => now(),
                 ]);
-                Log::info('Dispatching SendWebhookJob', ['transaction_id' => $this->transaction->transaction_id]);
-
-                dispatch(new SendWebhookJob($this->transaction, 'transaction.succeeded'));
+                $isSuccess = true;
             });
+
+            if ($isSuccess) {
+                Log::info('Dispatching SendWebhookJob', ['transaction_id' => $this->transaction->transaction_id]);
+                try {
+                    dispatch(new SendWebhookJob($this->transaction, 'transaction.succeeded'));
+                } catch (\Throwable $we) {
+                    Log::warning('SendWebhookJob error: ' . $we->getMessage());
+                }
+            }
 
         } catch (\Exception $e) {
             Log::error('PRODUCTION Transaction Error: ' . $e->getMessage());

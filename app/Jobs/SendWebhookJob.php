@@ -201,11 +201,17 @@ class SendWebhookJob implements ShouldQueue
         }
 
         try {
-            $response = $request->throw()->post($url, $payload);
-            Log::info("Webhook production envoyé à {$url} — statut: " . $response->status());
+            $response = $request->post($url, $payload);
+            if ($response->successful()) {
+                Log::info("Webhook production envoyé à {$url} — statut: " . $response->status());
+            } else {
+                Log::warning("Webhook production réponse non-200 ({$response->status()}) de {$url}");
+            }
         } catch (\Exception $e) {
             Log::error("Webhook production échoué vers {$url}: " . $e->getMessage());
-            throw $e;
+            if (config('queue.default') !== 'sync') {
+                throw $e;
+            }
         }
     }
 }
