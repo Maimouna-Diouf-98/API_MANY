@@ -127,36 +127,45 @@ class DashboardController extends Controller
         ];
     }
 
-    public function requestProduction(Request $request)
-    {
-        $aggregator = auth('aggregator')->user();
+   public function requestProduction(Request $request)
+{
+    $request->validate(['message' => 'nullable|string|max:1000']);
 
-        // Vérifier si une demande est déjà en cours
-        $existing = ProductionRequest::where('aggregator_id', $aggregator->id)
-                                     ->where('status', 'PENDING')
-                                     ->first();
+    $aggregator = auth('aggregator')->user();
 
-        if ($existing) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Une demande est déjà en cours de traitement.',
-            ], 409);
-        }
-
-        // Créer la demande
-        ProductionRequest::create([
-            'aggregator_id' => $aggregator->id,
-            'status'        => 'PENDING',
-            'message'       => $request->message ?? null,
-        ]);
-
-        // Envoyer email à l'admin Many
-        \Illuminate\Support\Facades\Mail::to(config('mail.admin_email', 'admin@many.sn'))
-            ->send(new \App\Mail\ProductionRequestMail($aggregator));
-
+    if ($aggregator->production_enabled) {
         return response()->json([
-            'success' => true,
-            'message' => 'Demande envoyée. L\'équipe Many vous contactera par email.',
-        ]);
+            'success' => false,
+            'message' => 'Votre compte est déjà activé en production.',
+        ], 409);
     }
+
+    $pending = \App\Domain\Auth\Models\ProductionRequest::where('aggregator_id', $aggregator->id)
+        ->where('status', 'PENDING')->exists();
+
+    if ($pending) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Une demande est déjà en cours de traitement.',
+        ], 409);
+    }
+
+    $productionRequest = \App\Domain\Auth\Models\ProductionRequest::create([
+        'aggregator_id' => $aggregator->id,
+        'status'        => 'PENDING',
+        'message'       => $request->message,
+    ]);
+
+    \App\Domain\Auth\Models\AdminNotification::create([
+        'type'       => 'PRODUCTION_REQUEST',
+        'title'      => 'Demande de passage en production',
+        'body'       => $aggregator->legal_name . ' (' . $aggregator->email . ')',
+        'related_id' => $productionRequest->id,
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'message' => "Demande envoyée. L'équipe Many l'examinera sous 24-48h.",
+    ]);
+}
 }

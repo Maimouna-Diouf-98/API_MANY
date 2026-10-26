@@ -17,6 +17,10 @@ return [
             'driver'   => 'session',
             'provider' => 'aggregators',
         ],
+        'admin' => [
+            'driver' => 'session', 
+            'provider' => 'admins'
+            ],
     ],
 
     'providers' => [
@@ -26,6 +30,10 @@ return [
             'driver' => 'eloquent',
             'model'  => App\Domain\Auth\Models\Aggregator::class,
         ],
+        'admins' =>[
+          'driver' => 'eloquent',
+          'model' => App\Domain\Auth\Models\Admin::class
+          ],
     ],
 
     'passwords' => [

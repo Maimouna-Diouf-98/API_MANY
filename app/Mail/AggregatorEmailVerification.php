@@ -25,17 +25,25 @@ class AggregatorEmailVerification extends Mailable
 
     public function content(): Content
     {
+        // Nom réel de la connexion utilisée (getConnectionName() peut renvoyer null
+        // quand la connexion par défaut est définie par un middleware)
+        $connection = $this->aggregator->getConnection()->getName();
+
         $verificationUrl = URL::temporarySignedRoute(
             'portal.verify.email',
             now()->addHours(24),
-            ['id' => $this->aggregator->id]
+            [
+                'id'   => $this->aggregator->id,
+                'conn' => $connection,
+                'hash' => sha1($this->aggregator->email),
+            ]
         );
 
         return new Content(
             view: 'emails.aggregator-verify',
             with: [
-                'aggregator'       => $this->aggregator,
-                'verificationUrl'  => $verificationUrl,
+                'aggregator'      => $this->aggregator,
+                'verificationUrl' => $verificationUrl,
             ]
         );
     }

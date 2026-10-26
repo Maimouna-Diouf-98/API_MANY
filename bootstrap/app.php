@@ -13,19 +13,25 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->redirectGuestsTo(fn () => route('portal.login'));
+
+        // Non connecté : login admin sous /backoffice, login portail ailleurs
+        $middleware->redirectGuestsTo(fn (Request $request) =>
+            $request->is('backoffice*') ? route('admin.login') : route('portal.login'));
+
+        // Déjà connecté : dashboard correspondant
+        $middleware->redirectUsersTo(fn (Request $request) =>
+            $request->is('backoffice*') ? route('admin.dashboard') : route('portal.dashboard'));
 
         $middleware->validateCsrfTokens(except: [
             'test-pos/*',
         ]);
 
         $middleware->alias([
-            'resolve.env'    => \App\Http\Middleware\ResolveEnvironmentConnection::class,
-            'verify.bearer'  => \App\Http\Middleware\VerifyBearerToken::class,
-            'verify.hmac'    => \App\Http\Middleware\VerifyHmacSignature::class,
+            'resolve.env'   => \App\Http\Middleware\ResolveEnvironmentConnection::class,
+            'verify.bearer' => \App\Http\Middleware\VerifyBearerToken::class,
+            'verify.hmac'   => \App\Http\Middleware\VerifyHmacSignature::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
-

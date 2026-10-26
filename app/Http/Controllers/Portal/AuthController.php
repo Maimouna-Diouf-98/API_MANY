@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -130,23 +131,23 @@ class AuthController extends Controller
         ]);
     }
 
-    public function verifyEmail(Request $request, string $id)
-    {
-        if (!$request->hasValidSignature()) {
-            abort(403, 'Lien de vérification invalide ou expiré.');
-        }
-
-        $aggregator = Aggregator::findOrFail($id);
-
-        if ($aggregator->email_verified_at) {
-            return redirect()->route('portal.login')
-                             ->with('success', 'Email déjà vérifié. Connectez-vous.');
-        }
-
-        $aggregator->update(['email_verified_at' => now()]);
-
-        return redirect()->route('portal.email.verified');
+   public function verifyEmail(Request $request, string $id)
+{
+    if (!$request->hasValidSignature()) {
+        abort(403, 'Lien de vérification invalide ou expiré.');
     }
+
+    $aggregator = Aggregator::findOrFail($id);
+
+    if ($aggregator->email_verified_at) {
+        return redirect()->route('portal.login')
+                         ->with('success', 'Email déjà vérifié. Connectez-vous.');
+    }
+
+    $aggregator->forceFill(['email_verified_at' => now()])->save();
+
+    return redirect()->route('portal.email.verified');
+}
 
     public function emailVerified()
     {
@@ -180,4 +181,69 @@ class AuthController extends Controller
         $request->session()->regenerateToken();
         return redirect()->route('portal.login');
     }
+    // En haut du fichier, vérifiez ces imports :
+
+public function updatePassword(Request $request)
+{
+    $data = $request->validate([
+        'current_password' => 'required|string',
+        'password'         => 'required|string|min:8|confirmed|different:current_password',
+    ]);
+
+    $aggregator = auth('aggregator')->user();
+
+    if (!Hash::check($data['current_password'], $aggregator->password)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Mot de passe actuel incorrect.',
+        ], 422);
+    }
+
+    $hashed = Hash::make($data['password']);
+
+    try {
+        DB::connection('mysql_sandbox')->transaction(function () use ($aggregator, $hashed) {
+
+            // 1. Compte sandbox (celui du login portail)
+            DB::connection('mysql_sandbox')->table('aggregators')
+              ->where('id', $aggregator->id)
+              ->update(['password' => $hashed, 'updated_at' => now()]);
+
+            // 2. Compte production, s'il existe déjà
+            $production = DB::connection('mysql_money')->table('aggregators')
+                            ->where('email', $aggregator->email)
+                            ->first();
+
+            if ($production) {
+                DB::connection('mysql_money')->transaction(function () use ($production, $hashed) {
+
+                    DB::connection('mysql_money')->table('aggregators')
+                      ->where('id', $production->id)
+                      ->update(['password' => $hashed, 'updated_at' => now()]);
+
+                    // mpin = mot de passe : sert à confirmer disbursements et bulks
+                    DB::connection('mysql_money')->table('users')
+                      ->where('id', $production->user_id)
+                      ->update([
+                          'password'   => $hashed,
+                          'mpin'       => $hashed,
+                          'updated_at' => now(),
+                      ]);
+                });
+            }
+        });
+    } catch (\Throwable $e) {
+        Log::error('updatePassword échoué : ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Impossible de mettre à jour le mot de passe. Réessayez.',
+        ], 500);
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Mot de passe mis à jour. Il sert aussi de PIN pour confirmer vos décaissements et paiements de masse.',
+    ]);
+}
 }

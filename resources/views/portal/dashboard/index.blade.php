@@ -75,42 +75,54 @@
             @endforeach
         </div>
 
-        {{-- Bouton demande production --}}
-        @if(!$productionRequest)
-            <div class="mt-6 pt-6 border-t border-gray-100 text-center">
-                <p class="text-sm text-gray-500 mb-4">
-                    Vos tests sont terminés ? Demandez l'accès à la production.
-                </p>
-                <button onclick="document.getElementById('modal-production').classList.remove('hidden')"
-                        class="px-6 py-2.5 rounded-lg text-sm font-medium text-white"
-                        style="background-color:#b13a7e;">
-                    🚀 Demander l'accès production
-                </button>
-            </div>
-        @elseif($productionRequest->status === 'PENDING')
-            <div class="mt-6 pt-6 border-t border-gray-100">
-                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-                    <p class="text-sm font-medium text-yellow-800">
-                        ⏳ Demande en cours de traitement
-                    </p>
-                    <p class="text-xs text-yellow-600 mt-1">
-                        L'équipe Many examine votre dossier et vous contactera
-                        par email sous 24-48h.
-                    </p>
-                </div>
-            </div>
-        @elseif($productionRequest->status === 'APPROVED')
-            <div class="mt-6 pt-6 border-t border-gray-100">
-                <div class="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                    <p class="text-sm font-medium text-green-800">
-                        ✅ Accès production approuvé !
-                    </p>
-                    <p class="text-xs text-green-600 mt-1">
-                        Vérifiez votre email pour vos credentials production.
-                    </p>
-                </div>
-            </div>
-        @endif
+      {{-- Bouton demande production --}}
+@if(!$productionRequest || $productionRequest->status === 'REJECTED')
+
+    @if($productionRequest && $productionRequest->status === 'REJECTED')
+        <div class="mt-6 bg-red-50 border border-red-200 rounded-lg p-4">
+            <p class="text-sm font-medium text-red-800">
+                Votre précédente demande a été refusée.
+            </p>
+            <p class="text-xs text-red-600 mt-1">
+                Motif : {{ $productionRequest->admin_note }}
+            </p>
+        </div>
+    @endif
+
+    <div class="mt-6 pt-6 border-t border-gray-100 text-center">
+        <button type="button"
+                onclick="document.getElementById('modal-production').classList.remove('hidden')"
+                class="px-6 py-2.5 rounded-lg text-sm font-medium text-white
+                       hover:opacity-90 transition"
+                style="background-color:#b13a7e;">
+            🚀 {{ $productionRequest ? 'Soumettre une nouvelle demande' : 'Demander l\'accès production' }}
+        </button>
+    </div>
+
+@elseif($productionRequest->status === 'PENDING')
+    <div class="mt-6 pt-6 border-t border-gray-100">
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+            <p class="text-sm font-medium text-yellow-800">
+                ⏳ Demande en cours de traitement
+            </p>
+            <p class="text-xs text-yellow-600 mt-1">
+                L'équipe Many examine votre dossier et vous contactera
+                par email sous 24-48h.
+            </p>
+        </div>
+    </div>
+@elseif($productionRequest->status === 'APPROVED')
+    <div class="mt-6 pt-6 border-t border-gray-100">
+        <div class="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+            <p class="text-sm font-medium text-green-800">
+                ✅ Accès production approuvé !
+            </p>
+            <p class="text-xs text-green-600 mt-1">
+                Vérifiez votre email pour vos credentials production.
+            </p>
+        </div>
+    </div>
+@endif
     </div>
 @endif
 
