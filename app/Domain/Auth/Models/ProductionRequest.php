@@ -14,17 +14,18 @@ class ProductionRequest extends Model
 
     protected $fillable = [
         'aggregator_id',
-        'status',
-        'message',
+        'status',        // PENDING | APPROVED | REJECTED
+        'message',       // message de l'agrégateur
         'reviewed_at',
+        'reviewed_by',   // admins.id
+        'admin_note',    // motif de refus
     ];
 
-    protected $casts = [
-        'reviewed_at' => 'datetime',
-    ];
+    protected $casts = ['reviewed_at' => 'datetime'];
 
-    public function aggregator()
+    /** Agrégateur sandbox lié (accesseur : évite toute ambiguïté de connexion). */
+    public function getAggregatorAttribute(): ?Aggregator
     {
-        return $this->belongsTo(Aggregator::class);
+        return Aggregator::on('mysql_sandbox')->find($this->aggregator_id);
     }
 }

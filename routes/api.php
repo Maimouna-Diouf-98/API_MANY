@@ -50,9 +50,6 @@ Route::prefix('v1')->middleware(['resolve.env', 'verify.bearer'])->group(functio
 Route::prefix('v1')->middleware(['resolve.env', 'verify.bearer', 'verify.hmac'])->group(function () {
 
 });
-// Route::get('/debug-key', function () {
-//     return response()->json(['key' => substr(config('app.key'), 0, 15)]);
-// });
 // Public — appelé par l'app mobile money
 Route::get('/v1/transactions/pending/{phone}',
     [\App\Http\Controllers\Api\V1\TransactionController::class, 'pendingForCustomer']);

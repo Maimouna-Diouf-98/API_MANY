@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\View;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -17,8 +18,14 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Bootstrap any application services.
      */
-    public function boot(): void
-    {
-        //
-    }
+   
+
+
+public function boot(): void
+{
+    View::composer('layouts.admin', function ($view) {
+        $view->with('unreadCount',
+            \App\Domain\Auth\Models\AdminNotification::whereNull('read_at')->count());
+    });
+}
 }

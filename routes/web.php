@@ -2,74 +2,62 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Portal\AuthController as PortalAuthController;
-use App\Http\Controllers\Admin\AuthController as AdminAuthController;
 use App\Http\Controllers\Portal\ApplicationController;
 use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\SubMerchantController as PortalSubMerchantController;
 use App\Http\Controllers\Portal\TransactionController as PortalTransactionController;
 
-
 // ─── Portail Agrégateur ───────────────────────────────
 Route::prefix('portal')->name('portal.')->group(function () {
 
     // Pages publiques (non connecté)
-    Route::get('/login', [PortalAuthController::class, 'showLogin'])
-         ->name('login');
+    Route::get('/login', [PortalAuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [PortalAuthController::class, 'login']);
 
-    Route::get('/register', [PortalAuthController::class, 'showRegister'])
-     ->name('register');
+    Route::get('/register', [PortalAuthController::class, 'showRegister'])->name('register');
     Route::post('/register', [PortalAuthController::class, 'register']);
 
-    Route::post('/logout', [PortalAuthController::class, 'logout'])
-         ->name('logout');
+    Route::post('/logout', [PortalAuthController::class, 'logout'])->name('logout');
 
-Route::middleware('auth:aggregator')->group(function () {
+    // Zone protégée (agrégateur connecté)
+    Route::middleware('auth:aggregator')->group(function () {
 
-    Route::get('/dashboard', [DashboardController::class, 'index'])
-         ->name('dashboard');
-     Route::post('/dashboard/request-production',
-         [DashboardController::class, 'requestProduction'])
-         ->name('dashboard.request.production');
+        Route::get('/dashboard', [DashboardController::class, 'index'])
+             ->name('dashboard');
+        Route::post('/dashboard/request-production', [DashboardController::class, 'requestProduction'])
+             ->name('dashboard.request.production');
 
-    // Applications
-    Route::get('/applications', [ApplicationController::class, 'index'])
-         ->name('applications.index');
-    Route::post('/applications', [ApplicationController::class, 'store'])
-         ->name('applications.store');
-    Route::get('/applications/{id}', [ApplicationController::class, 'show'])
-         ->name('applications.show');
-    Route::delete('/applications/{id}', [ApplicationController::class, 'destroy'])
-         ->name('applications.destroy');
+        // Changement de mot de passe (met aussi à jour le mpin en production)
+        Route::post('/update-password', [PortalAuthController::class, 'updatePassword'])
+             ->name('update.password');
 
-    // Sous-marchands imbriqués dans applications
-    Route::prefix('applications/{appId}/sub-merchants')
-         ->name('sub-merchants.')
-         ->group(function () {
-             Route::post('/', [PortalSubMerchantController::class, 'store'])
-                  ->name('store');
-             Route::get('/{smId}', [PortalSubMerchantController::class, 'show'])
-                  ->name('show');
-             Route::post('/{smId}/activate', [PortalSubMerchantController::class, 'activate'])
-                  ->name('activate');
-             Route::post('/{smId}/suspend', [PortalSubMerchantController::class, 'suspend'])
-                  ->name('suspend');
-             Route::post('/{smId}/close', [PortalSubMerchantController::class, 'close'])
-                  ->name('close');
-         });
+        // Applications
+        Route::get('/applications', [ApplicationController::class, 'index'])
+             ->name('applications.index');
+        Route::post('/applications', [ApplicationController::class, 'store'])
+             ->name('applications.store');
+        Route::get('/applications/{id}', [ApplicationController::class, 'show'])
+             ->name('applications.show');
+        Route::delete('/applications/{id}', [ApplicationController::class, 'destroy'])
+             ->name('applications.destroy');
 
-    // Transactions
-    Route::prefix('transactions')->name('transactions.')->group(function () {
-        Route::get('/', [PortalTransactionController::class, 'index'])
-             ->name('index');
-        Route::get('/{transactionId}', [PortalTransactionController::class, 'show'])
-             ->name('show');
-    });
+        // Sous-marchands imbriqués dans applications
+        Route::prefix('applications/{appId}/sub-merchants')
+             ->name('sub-merchants.')
+             ->group(function () {
+                 Route::post('/', [PortalSubMerchantController::class, 'store'])->name('store');
+                 Route::get('/{smId}', [PortalSubMerchantController::class, 'show'])->name('show');
+                 Route::post('/{smId}/activate', [PortalSubMerchantController::class, 'activate'])->name('activate');
+                 Route::post('/{smId}/suspend', [PortalSubMerchantController::class, 'suspend'])->name('suspend');
+                 Route::post('/{smId}/close', [PortalSubMerchantController::class, 'close'])->name('close');
+             });
 
-
-}); // fin auth:aggregator
-
-
+        // Transactions
+        Route::prefix('transactions')->name('transactions.')->group(function () {
+            Route::get('/', [PortalTransactionController::class, 'index'])->name('index');
+            Route::get('/{transactionId}', [PortalTransactionController::class, 'show'])->name('show');
+        });
+    }); // fin auth:aggregator
 
     // Vérification email
     Route::get('/verify-email/{id}', [PortalAuthController::class, 'verifyEmail'])
@@ -84,5 +72,8 @@ Route::middleware('auth:aggregator')->group(function () {
          ->middleware('auth:aggregator');
 });
 
-// Redirection page d'accueil et alias de secours pour la route login
-Route::get('/', fn() => redirect()->route('portal.login'));
+// Redirection page d'accueil
+Route::get('/', fn () => redirect()->route('portal.login'));
+
+// ─── Espace admin Many (/backoffice) ──────────────────
+require __DIR__ . '/admin.php';
