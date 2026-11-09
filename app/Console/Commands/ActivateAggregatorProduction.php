@@ -11,7 +11,7 @@ class ActivateAggregatorProduction extends Command
 {
     protected $signature = 'aggregator:activate-production
                             {email : Email de l\'agrégateur inscrit en sandbox}
-                            {--commission=0.00 : Taux de commission}
+                            {--commission=1.50 : Taux de commission}
                             {--no-mail : Ne pas envoyer l\'email de credentials}';
 
     protected $description = 'Active un agrégateur sandbox en production (alternative à l\'espace admin)';

@@ -1,147 +1,95 @@
 @extends('layouts.portal')
 
-@section('title', 'Applications — Many Portail')
+@section('title', 'Applications — Many')
 @section('page_title', 'Applications')
 
 @section('content')
 
-<div class="flex items-center justify-between mb-6">
-    <p class="text-sm text-gray-500">
-        Gérez vos clés d'accès à l'API Many.
-    </p>
-    <button onclick="document.getElementById('modal-create').classList.remove('hidden')"
-            class="px-4 py-2 rounded-lg text-sm font-medium text-white"
-            style="background-color:#b13a7e;">
-        + Nouvelle application
-    </button>
-</div>
+@php $isProd = $env === 'production'; @endphp
 
-@if($applications->isEmpty())
-    <div class="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <svg class="w-10 h-10 mx-auto mb-3 text-gray-300"
-             fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
-        </svg>
-        <p class="text-sm font-medium text-gray-500">Aucune application créée</p>
-        <p class="text-xs text-gray-400 mt-1">
-            Créez votre première application pour obtenir vos clés API.
+<div class="flex flex-wrap items-end justify-between gap-4 mb-8">
+    <div>
+        <h2 class="text-2xl font-bold tracking-tight">Applications</h2>
+        <p class="text-sm text-slate-500 mt-1">
+            Chaque application dispose de ses identifiants API
+            ({{ $isProd ? 'préfixe agg_live_' : 'préfixe agg_sandbox_' }}) et regroupe vos sous-marchands.
         </p>
     </div>
-@else
-    <div class="space-y-4">
-        @foreach($applications as $app)
-            <div class="bg-white rounded-xl border border-gray-200 p-6
-                        hover:border-gray-300 transition cursor-pointer"
-                 onclick="window.location='{{ route('portal.applications.show', $app->id) }}'">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-4">
-                        <div class="w-10 h-10 rounded-lg flex items-center justify-center"
-                             style="background-color:#f9eef5;">
-                            <svg class="w-5 h-5" style="color:#b13a7e;"
-                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                      stroke-width="2"
-                                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <div class="flex items-center space-x-2">
-                                <h3 class="text-sm font-semibold text-gray-900">
-                                    {{ $app->name }}
-                                </h3>
-                                <span class="text-xs px-2 py-0.5 rounded-full font-medium
-                                    {{ $app->is_active
-                                        ? 'bg-green-100 text-green-700'
-                                        : 'bg-gray-100 text-gray-500' }}">
-                                    {{ $app->is_active ? 'Active' : 'Inactive' }}
-                                </span>
-                                <span class="text-xs px-2 py-0.5 rounded-full font-medium"
-                                      style="background-color:#f9eef5; color:#b13a7e;">
-                                    {{ $app->environment }}
-                                </span>
-                            </div>
-                            <p class="text-xs font-mono text-gray-400 mt-0.5">
-                                {{ $app->client_id }}
-                            </p>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-6">
-                        <div class="text-center">
-                            <p class="text-lg font-bold text-gray-900">
-                                {{ $app->sub_merchants_count }}
-                            </p>
-                            <p class="text-xs text-gray-400">
-                                {{ $app->sub_merchants_count > 1
-                                    ? 'Sous-marchands'
-                                    : 'Sous-marchand' }}
-                            </p>
-                        </div>
-                        <svg class="w-4 h-4 text-gray-400"
-                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                  stroke-width="2" d="M9 5l7 7-7 7"/>
-                        </svg>
-                    </div>
+</div>
+
+{{-- Création --}}
+<details class="group rounded-2xl bg-white border border-slate-200 shadow-sm mb-8" {{ $errors->any() ? 'open' : '' }}>
+    <summary class="flex cursor-pointer list-none items-center justify-between px-6 py-4">
+        <span class="inline-flex items-center gap-2 font-semibold">
+            <span class="h-8 w-8 rounded-lg bg-[#b13a7e]/10 text-[#b13a7e] flex items-center justify-center">
+                @include('portal.partials.icon', ['name' => 'plus', 'class' => 'w-4 h-4'])
+            </span>
+            Nouvelle application
+        </span>
+        <span class="text-xs text-slate-400 group-open:hidden">Cliquer pour ouvrir</span>
+    </summary>
+
+    <form method="POST" action="{{ route('portal.applications.store') }}" class="px-6 pb-6 pt-2 grid md:grid-cols-2 gap-4">
+        @csrf
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Nom de l'application</label>
+            <input type="text" name="name" value="{{ old('name') }}" required maxlength="255" placeholder="Ex : Boutique en ligne"
+                   class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#b13a7e]/40">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">URL de webhook</label>
+            <input type="url" name="webhook_url" value="{{ old('webhook_url') }}" required maxlength="255" placeholder="https://votre-site.sn/webhooks/many"
+                   class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#b13a7e]/40">
+        </div>
+        <div class="md:col-span-2 flex items-center justify-between gap-4">
+            <p class="text-xs text-slate-400">Le client_secret ne sera affiché qu'une seule fois après la création.</p>
+            <button class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#b13a7e] hover:bg-[#9a3069]">Créer l'application</button>
+        </div>
+    </form>
+</details>
+
+{{-- Liste --}}
+@forelse($applications as $app)
+    @if($loop->first)<div class="grid md:grid-cols-2 xl:grid-cols-3 gap-4">@endif
+
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6 flex flex-col">
+        <div class="flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="h-10 w-10 shrink-0 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                    @include('portal.partials.icon', ['name' => 'cube'])
+                </span>
+                <div class="min-w-0">
+                    <a href="{{ route('portal.applications.show', $app->id) }}" class="font-semibold hover:underline truncate block">{{ $app->name }}</a>
+                    <p class="text-xs text-slate-400">Créée le {{ \Carbon\Carbon::parse($app->created_at)->format('d/m/Y') }}</p>
                 </div>
             </div>
-        @endforeach
-    </div>
-@endif
-
-{{-- Modal création --}}
-<div id="modal-create"
-     class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center
-            justify-center z-50">
-    <div class="bg-white rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-sm font-semibold text-gray-900">Nouvelle application</h2>
-            <button onclick="document.getElementById('modal-create').classList.add('hidden')"
-                    class="text-gray-400 hover:text-gray-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round"
-                          stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
+            @include('portal.partials.badge', ['status' => $app->is_active ? 'ACTIVE' : 'CLOSED'])
         </div>
-        <form method="POST" action="{{ route('portal.applications.store') }}"
-              class="space-y-4">
-            @csrf
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">
-                    Nom de l'application
-                </label>
-                <input type="text" name="name"
-                       placeholder="Mon système de paiement"
-                       class="w-full px-4 py-2.5 border border-gray-300
-                              rounded-lg text-sm"
-                       required>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">
-                    URL de webhook
-                </label>
-                <input type="url" name="webhook_url"
-                       placeholder="https://monsite.sn/webhooks/many"
-                       class="w-full px-4 py-2.5 border border-gray-300
-                              rounded-lg text-sm"
-                       required>
-            </div>
-            <div class="flex space-x-3 pt-2">
-                <button type="button"
-                        onclick="document.getElementById('modal-create').classList.add('hidden')"
-                        class="flex-1 py-2.5 rounded-lg text-sm font-medium
-                               border border-gray-300 text-gray-600">
-                    Annuler
-                </button>
-                <button type="submit"
-                        class="flex-1 py-2.5 rounded-lg text-sm font-medium text-white"
-                        style="background-color:#b13a7e;">
-                    Créer
-                </button>
-            </div>
-        </form>
+
+        <div class="mt-4 rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between gap-2">
+            <code class="text-xs text-slate-600 truncate">{{ $app->client_id }}</code>
+            <button type="button" onclick="copyText('{{ $app->client_id }}', this)"
+                    class="text-xs font-medium text-[#b13a7e] hover:underline shrink-0">Copier</button>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between text-sm">
+            <span class="inline-flex items-center gap-2 text-slate-500">
+                @include('portal.partials.icon', ['name' => 'store', 'class' => 'w-4 h-4'])
+                {{ $app->sub_merchants_count }} sous-marchand(s)
+            </span>
+            <a href="{{ route('portal.applications.show', $app->id) }}" class="font-semibold text-[#b13a7e] hover:underline">Gérer →</a>
+        </div>
     </div>
-</div>
+
+    @if($loop->last)</div>@endif
+@empty
+    <div class="rounded-2xl border-2 border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+        <span class="mx-auto h-12 w-12 rounded-2xl bg-[#b13a7e]/10 text-[#b13a7e] flex items-center justify-center">
+            @include('portal.partials.icon', ['name' => 'cube', 'class' => 'w-6 h-6'])
+        </span>
+        <p class="mt-4 font-semibold">Aucune application</p>
+        <p class="text-sm text-slate-500 mt-1">Créez votre première application pour obtenir vos identifiants API.</p>
+    </div>
+@endforelse
 
 @endsection

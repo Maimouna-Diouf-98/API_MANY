@@ -2,170 +2,99 @@
 
 namespace App\Http\Controllers\Portal;
 
-use App\Http\Controllers\Controller;
-use App\Domain\Auth\Models\Application;
+use App\Domain\Auth\Models\AdminNotification;
 use App\Domain\Auth\Models\ProductionRequest;
-use App\Domain\SubMerchants\Models\SubMerchant;
-use App\Domain\Transactions\Models\Transaction;
-use App\Domain\Disbursements\Models\Disbursement;
-use App\Domain\BulkPayments\Models\BulkPayment;
+use App\Domain\Auth\Services\AggregatorStatsService;
+use App\Domain\Auth\Services\PortalEnvironmentService;
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    public function __construct(
+        protected AggregatorStatsService   $stats,
+        protected PortalEnvironmentService $environments,
+    ) {}
+
     public function index()
     {
         $aggregator = auth('aggregator')->user();
+        $ctx        = $this->environments->resolve($aggregator);
+        $env        = $ctx['env'];
 
-        $applicationIds = Application::where('aggregator_id', $aggregator->id)
-                                     ->pluck('id');
+        $data = $this->stats->detail($env, $ctx['aggregator_id']);
+        abort_if($data === null, 404);
 
-        // Applications et sous-marchands
-        $totalApplications = Application::where('aggregator_id', $aggregator->id)
-                                        ->where('is_active', true)
-                                        ->count();
+        $activity = $this->stats->activity($env, $ctx['aggregator_id']);
 
-        $totalSubMerchants = SubMerchant::whereIn('application_id', $applicationIds)
-                                        ->where('status', 'ACTIVE')
-                                        ->count();
-
-        // Collections
-        $totalCollections = Transaction::where('aggregator_id', $aggregator->id)
-                                       ->where('status', 'SUCCESS')
-                                       ->count();
-
-        $totalVolume = Transaction::where('aggregator_id', $aggregator->id)
-                                  ->where('status', 'SUCCESS')
-                                  ->sum('amount');
-
-        // Disbursements
-        $totalDisbursements = Disbursement::where('aggregator_id', $aggregator->id)
-                                          ->where('status', 'SUCCESS')
-                                          ->count();
-
-        $totalDisbursed = Disbursement::where('aggregator_id', $aggregator->id)
-                                      ->where('status', 'SUCCESS')
-                                      ->sum('amount');
-
-        // Bulk payments
-        $totalBulk       = BulkPayment::where('aggregator_id', $aggregator->id)
-                                       ->where('status', 'COMPLETED')
-                                       ->count();
-
-        $totalBulkAmount = BulkPayment::where('aggregator_id', $aggregator->id)
-                                      ->where('status', 'COMPLETED')
-                                      ->sum('total_amount');
-
-        $totalDecaisse = $totalDisbursed + $totalBulkAmount;
-
-        // Balance wallet
-        $wallet = null;
-        if ($aggregator->user_id) {
-            $wallet = DB::connection('mysql_sandbox')
-                        ->table('wallets')
-                        ->where('user_id', $aggregator->user_id)
-                        ->first();
-        }
-
-        $balance = $wallet ? (float) $wallet->balance : 0;
-
-        // Transactions récentes (7 derniers jours)
-        $recentTransactions = Transaction::where('aggregator_id', $aggregator->id)
-                                         ->latest()
-                                         ->take(5)
-                                         ->get();
-
-        // Données graphique collections (7 derniers jours)
-        $chartData = $this->getChartData($aggregator->id);
-
-        // Statut de la demande de production
         $productionRequest = ProductionRequest::where('aggregator_id', $aggregator->id)
                                               ->latest()
                                               ->first();
 
-        return view('portal.dashboard.index', compact(
-            'aggregator',
-            'totalApplications',
-            'totalSubMerchants',
-            'totalCollections',
-            'totalVolume',
-            'totalDisbursements',
-            'totalDisbursed',
-            'totalBulk',
-            'totalBulkAmount',
-            'totalDecaisse',
-            'balance',
-            'recentTransactions',
-            'chartData',
-            'productionRequest',
-        ));
+        return view('portal.dashboard.index', [
+            'aggregator'         => $aggregator,                 // compte de connexion (sandbox)
+            'envAggregator'      => $data['aggregator'],         // ligne de l'environnement affiché
+            'env'                => $env,
+            'hasProduction'      => $ctx['has_production'],
+            'data'               => $data,
+            'activity'           => $activity,
+            'activeSubMerchants' => $data['sub_merchants']->where('status', 'ACTIVE')->count(),
+            'productionRequest'  => $productionRequest,
+        ]);
     }
 
-    private function getChartData(string $aggregatorId): array
+    /** Bascule Sandbox <-> Production (uniquement si le compte production existe). */
+    public function switchEnvironment(Request $request)
     {
-        $days = collect(range(6, 0))->map(fn($i) => now()->subDays($i)->format('Y-m-d'));
+        $data = $request->validate(['env' => 'required|in:sandbox,production']);
 
-        $collections = Transaction::where('aggregator_id', $aggregatorId)
-                                   ->where('status', 'SUCCESS')
-                                   ->where('created_at', '>=', now()->subDays(6)->startOfDay())
-                                   ->selectRaw('DATE(created_at) as date, SUM(amount) as total, COUNT(*) as count')
-                                   ->groupBy('date')
-                                   ->pluck('total', 'date');
+        if (!$this->environments->switchTo(auth('aggregator')->user(), $data['env'])) {
+            return redirect()->route('portal.dashboard')
+                ->with('error', "Votre compte n'est pas encore activé en production.");
+        }
 
-        $disbursements = Disbursement::where('aggregator_id', $aggregatorId)
-                                      ->where('status', 'SUCCESS')
-                                      ->where('created_at', '>=', now()->subDays(6)->startOfDay())
-                                      ->selectRaw('DATE(created_at) as date, SUM(amount) as total')
-                                      ->groupBy('date')
-                                      ->pluck('total', 'date');
-
-        return [
-            'labels'       => $days->map(fn($d) => \Carbon\Carbon::parse($d)->format('d/m'))->values()->toArray(),
-            'collections'  => $days->map(fn($d) => (float) ($collections[$d] ?? 0))->values()->toArray(),
-            'disbursements'=> $days->map(fn($d) => (float) ($disbursements[$d] ?? 0))->values()->toArray(),
-        ];
+        return redirect()->route('portal.dashboard');
     }
 
-   public function requestProduction(Request $request)
-{
-    $request->validate(['message' => 'nullable|string|max:1000']);
+    public function requestProduction(Request $request)
+    {
+        $request->validate(['message' => 'nullable|string|max:1000']);
 
-    $aggregator = auth('aggregator')->user();
+        $aggregator = auth('aggregator')->user();
 
-    if ($aggregator->production_enabled) {
+        if ($aggregator->production_enabled) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Votre compte est déjà activé en production.',
+            ], 409);
+        }
+
+        $pending = ProductionRequest::where('aggregator_id', $aggregator->id)
+                                    ->where('status', 'PENDING')->exists();
+
+        if ($pending) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Une demande est déjà en cours de traitement.',
+            ], 409);
+        }
+
+        $productionRequest = ProductionRequest::create([
+            'aggregator_id' => $aggregator->id,
+            'status'        => 'PENDING',
+            'message'       => $request->message,
+        ]);
+
+        AdminNotification::create([
+            'type'       => 'PRODUCTION_REQUEST',
+            'title'      => 'Demande de passage en production',
+            'body'       => $aggregator->legal_name . ' (' . $aggregator->email . ')',
+            'related_id' => $productionRequest->id,
+        ]);
+
         return response()->json([
-            'success' => false,
-            'message' => 'Votre compte est déjà activé en production.',
-        ], 409);
+            'success' => true,
+            'message' => "Demande envoyée. L'équipe Many l'examinera sous 24-48h.",
+        ]);
     }
-
-    $pending = \App\Domain\Auth\Models\ProductionRequest::where('aggregator_id', $aggregator->id)
-        ->where('status', 'PENDING')->exists();
-
-    if ($pending) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Une demande est déjà en cours de traitement.',
-        ], 409);
-    }
-
-    $productionRequest = \App\Domain\Auth\Models\ProductionRequest::create([
-        'aggregator_id' => $aggregator->id,
-        'status'        => 'PENDING',
-        'message'       => $request->message,
-    ]);
-
-    \App\Domain\Auth\Models\AdminNotification::create([
-        'type'       => 'PRODUCTION_REQUEST',
-        'title'      => 'Demande de passage en production',
-        'body'       => $aggregator->legal_name . ' (' . $aggregator->email . ')',
-        'related_id' => $productionRequest->id,
-    ]);
-
-    return response()->json([
-        'success' => true,
-        'message' => "Demande envoyée. L'équipe Many l'examinera sous 24-48h.",
-    ]);
-}
 }

@@ -1,13 +1,15 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Portal\AuthController as PortalAuthController;
+use App\Http\Controllers\CheckoutController;
+use App\Http\Controllers\Portal\AccountController;
 use App\Http\Controllers\Portal\ApplicationController;
+use App\Http\Controllers\Portal\AuthController as PortalAuthController;
 use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\SubMerchantController as PortalSubMerchantController;
 use App\Http\Controllers\Portal\TransactionController as PortalTransactionController;
 
-// ─── Portail Agrégateur ───────────────────────────────
+// ─── Portail agrégateur ───────────────────────────────
 Route::prefix('portal')->name('portal.')->group(function () {
 
     // Pages publiques (non connecté)
@@ -22,24 +24,26 @@ Route::prefix('portal')->name('portal.')->group(function () {
     // Zone protégée (agrégateur connecté)
     Route::middleware('auth:aggregator')->group(function () {
 
-        Route::get('/dashboard', [DashboardController::class, 'index'])
-             ->name('dashboard');
+        // Tableau de bord
+        Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+        Route::post('/dashboard/environment', [DashboardController::class, 'switchEnvironment'])
+             ->name('dashboard.environment');
         Route::post('/dashboard/request-production', [DashboardController::class, 'requestProduction'])
              ->name('dashboard.request.production');
 
-        // Changement de mot de passe (met aussi à jour le mpin en production)
-        Route::post('/update-password', [PortalAuthController::class, 'updatePassword'])
-             ->name('update.password');
+        // Mot de passe (met aussi à jour le mpin en production)
+        Route::get('/account/password', [AccountController::class, 'showPassword'])->name('account.password');
+        Route::post('/update-password', [PortalAuthController::class, 'updatePassword'])->name('update.password');
 
         // Applications
-        Route::get('/applications', [ApplicationController::class, 'index'])
-             ->name('applications.index');
-        Route::post('/applications', [ApplicationController::class, 'store'])
-             ->name('applications.store');
-        Route::get('/applications/{id}', [ApplicationController::class, 'show'])
-             ->name('applications.show');
-        Route::delete('/applications/{id}', [ApplicationController::class, 'destroy'])
-             ->name('applications.destroy');
+        Route::get('/applications', [ApplicationController::class, 'index'])->name('applications.index');
+        Route::post('/applications', [ApplicationController::class, 'store'])->name('applications.store');
+        Route::get('/applications/{id}', [ApplicationController::class, 'show'])->name('applications.show');
+        Route::delete('/applications/{id}', [ApplicationController::class, 'destroy'])->name('applications.destroy');
+        Route::post('/applications/{id}/regenerate-secret', [ApplicationController::class, 'regenerateSecret'])
+             ->name('applications.regenerate-secret');
+        Route::post('/applications/{id}/reactivate', [ApplicationController::class, 'reactivate'])
+             ->name('applications.reactivate');
 
         // Sous-marchands imbriqués dans applications
         Route::prefix('applications/{appId}/sub-merchants')
@@ -52,9 +56,10 @@ Route::prefix('portal')->name('portal.')->group(function () {
                  Route::post('/{smId}/close', [PortalSubMerchantController::class, 'close'])->name('close');
              });
 
-        // Transactions
+        // Transactions (l'export doit être déclaré avant /{transactionId})
         Route::prefix('transactions')->name('transactions.')->group(function () {
             Route::get('/', [PortalTransactionController::class, 'index'])->name('index');
+            Route::get('/export', [PortalTransactionController::class, 'export'])->name('export');
             Route::get('/{transactionId}', [PortalTransactionController::class, 'show'])->name('show');
         });
     }); // fin auth:aggregator
@@ -71,6 +76,18 @@ Route::prefix('portal')->name('portal.')->group(function () {
          ->name('resend.verification')
          ->middleware('auth:aggregator');
 });
+
+// ─── Page de paiement (checkout) : publique, protégée par un lien signé ───
+Route::prefix('checkout/{env}/{transactionId}')
+    ->where(['env' => 'sandbox|production', 'transactionId' => '[0-9]{10}'])
+    ->middleware('signed')
+    ->name('checkout.')
+    ->group(function () {
+        Route::get('/', [CheckoutController::class, 'show'])->name('show');
+        Route::get('/status', [CheckoutController::class, 'status'])
+             ->middleware('throttle:120,1')
+             ->name('status');
+    });
 
 // Redirection page d'accueil
 Route::get('/', fn () => redirect()->route('portal.login'));

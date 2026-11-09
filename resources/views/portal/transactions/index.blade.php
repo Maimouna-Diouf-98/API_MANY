@@ -1,269 +1,150 @@
 @extends('layouts.portal')
 
-@section('title', 'Transactions — Many Portail')
-@section('page_title', 'Transactions & Décaissements')
+@section('title', 'Transactions — Many')
+@section('page_title', 'Transactions')
 
 @section('content')
 
-{{-- Cartes statistiques --}}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+@php
+    $money = fn ($v) => number_format((float) $v, 0, ',', ' ');
 
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <p class="text-xs text-gray-400 mb-1">Collections réussies</p>
-        <p class="text-2xl font-bold text-gray-900">{{ $totalCollections }}</p>
-        <p class="text-xs text-gray-400 mt-1">
-            {{ number_format($totalAmount, 0, ',', ' ') }} XOF
-        </p>
+    $tabs = ['collections' => 'Collections', 'disbursements' => 'Décaissements', 'bulks' => 'Paiements de masse'];
+    $idCol = ['collections' => 'transaction_id', 'disbursements' => 'disbursement_id', 'bulks' => 'bulk_id'][$type];
+
+    $statusOptions = [
+        'collections'   => ['PENDING' => 'En attente', 'SUCCESS' => 'Réussi', 'FAILED' => 'Échoué', 'REFUNDED' => 'Remboursé'],
+        'disbursements' => ['PENDING' => 'En attente', 'SUCCESS' => 'Réussi', 'FAILED' => 'Échoué'],
+        'bulks'         => ['PENDING' => 'En attente', 'PROCESSING' => 'En cours', 'COMPLETED' => 'Terminé', 'FAILED' => 'Échoué'],
+    ][$type];
+
+    $hasFilters = collect($filters)->except('type')->filter()->isNotEmpty();
+@endphp
+
+<div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+    <div>
+        <h2 class="text-2xl font-bold tracking-tight">Transactions</h2>
+        <p class="text-sm text-slate-500 mt-1">{{ $env === 'production' ? 'Opérations réelles' : 'Opérations de test' }} de votre compte.</p>
     </div>
+    <a href="{{ route('portal.transactions.export', array_merge(request()->except('page'), ['type' => $type])) }}"
+       class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold ring-1 ring-inset ring-slate-300 hover:bg-slate-50">
+        @include('portal.partials.icon', ['name' => 'download', 'class' => 'w-4 h-4']) Exporter en CSV
+    </a>
+</div>
 
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <p class="text-xs text-gray-400 mb-1">Décaissements unitaires</p>
-        <p class="text-2xl font-bold text-gray-900">{{ $totalDisbursements }}</p>
-        <p class="text-xs text-gray-400 mt-1">
-            {{ number_format($totalDisbursed, 0, ',', ' ') }} XOF
-        </p>
-    </div>
-
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <p class="text-xs text-gray-400 mb-1">Paiements de masse</p>
-        <p class="text-2xl font-bold text-gray-900">{{ $totalBulk }}</p>
-        <p class="text-xs text-gray-400 mt-1">
-            {{ number_format($totalBulkAmount, 0, ',', ' ') }} XOF
-        </p>
-    </div>
-
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <p class="text-xs text-gray-400 mb-1">Total décaissé</p>
-        <p class="text-xl font-bold text-gray-900">
-            {{ number_format($totalDecaisse, 0, ',', ' ') }}
-            <span class="text-xs font-normal text-gray-400">XOF</span>
-        </p>
-        <p class="text-xs text-gray-400 mt-1">Unitaires + masse</p>
-    </div>
-
+{{-- Onglets --}}
+<div class="flex gap-6 border-b border-slate-200 mb-6 overflow-x-auto">
+    @foreach($tabs as $key => $label)
+        <a href="{{ route('portal.transactions.index', ['type' => $key]) }}"
+           class="pb-3 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px transition
+                  {{ $type === $key ? 'border-[#b13a7e] text-[#b13a7e]' : 'border-transparent text-slate-500 hover:text-slate-800' }}">
+            {{ $label }}
+        </a>
+    @endforeach
 </div>
 
 {{-- Filtres --}}
-<div class="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-    <form method="GET" action="{{ route('portal.transactions.index') }}"
-          class="flex items-center space-x-4 flex-wrap gap-3">
+<form method="GET" action="{{ route('portal.transactions.index') }}"
+      class="rounded-2xl bg-white border border-slate-200 shadow-sm p-4 mb-6 grid gap-3 md:grid-cols-6">
+    <input type="hidden" name="type" value="{{ $type }}">
 
-        <select name="type"
-                class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                onchange="this.form.submit()">
-            <option value="all"         {{ $type === 'all'         ? 'selected' : '' }}>
-                Tout
-            </option>
-            <option value="collection"  {{ $type === 'collection'  ? 'selected' : '' }}>
-                Collections
-            </option>
-            <option value="disbursement"{{ $type === 'disbursement'? 'selected' : '' }}>
-                Décaissements unitaires
-            </option>
-            <option value="bulk"        {{ $type === 'bulk'        ? 'selected' : '' }}>
-                Paiements de masse
-            </option>
-        </select>
+    <div class="md:col-span-2 relative">
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">@include('portal.partials.icon', ['name' => 'search', 'class' => 'w-4 h-4'])</span>
+        <input type="text" name="q" value="{{ $filters['q'] ?? '' }}" placeholder="Rechercher (référence, téléphone…)"
+               class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#b13a7e]/40">
+    </div>
 
-        <select name="status"
-                class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                onchange="this.form.submit()">
-            <option value="">Tous les statuts</option>
-            <option value="PENDING"
-                {{ request('status') === 'PENDING' ? 'selected' : '' }}>
-                En attente
-            </option>
-            <option value="SUCCESS"
-                {{ request('status') === 'SUCCESS' ? 'selected' : '' }}>
-                Réussi
-            </option>
-            <option value="COMPLETED"
-                {{ request('status') === 'COMPLETED' ? 'selected' : '' }}>
-                Complété
-            </option>
-            <option value="FAILED"
-                {{ request('status') === 'FAILED' ? 'selected' : '' }}>
-                Échoué
-            </option>
-        </select>
+    <select name="status" class="px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+        <option value="">Tous les statuts</option>
+        @foreach($statusOptions as $value => $label)
+            <option value="{{ $value }}" @selected(($filters['status'] ?? '') === $value)>{{ $label }}</option>
+        @endforeach
+    </select>
 
-        @if(request('status') || $type !== 'all')
-            <a href="{{ route('portal.transactions.index') }}"
-               class="text-sm text-gray-400 hover:text-gray-600">
-                Réinitialiser
-            </a>
+    <select name="sub_merchant_id" class="px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+        <option value="">Tous les marchands</option>
+        @foreach($subMerchants as $sm)
+            <option value="{{ $sm->id }}" @selected(($filters['sub_merchant_id'] ?? '') === $sm->id)>{{ $sm->legal_name }}</option>
+        @endforeach
+    </select>
+
+    <input type="date" name="from" value="{{ $filters['from'] ?? '' }}" class="px-3 py-2.5 rounded-xl border border-slate-300 text-sm" title="Du">
+    <input type="date" name="to" value="{{ $filters['to'] ?? '' }}" class="px-3 py-2.5 rounded-xl border border-slate-300 text-sm" title="Au">
+
+    <div class="md:col-span-6 flex items-center gap-3">
+        <button class="rounded-xl px-5 py-2.5 text-sm font-semibold text-white bg-[#b13a7e] hover:bg-[#9a3069]">Filtrer</button>
+        @if($hasFilters)
+            <a href="{{ route('portal.transactions.index', ['type' => $type]) }}" class="text-sm text-slate-500 hover:text-slate-800">Réinitialiser</a>
         @endif
-    </form>
-</div>
+        <span class="ml-auto text-xs text-slate-400">{{ $items->total() }} résultat(s)</span>
+    </div>
+</form>
 
 {{-- Tableau --}}
-@if(count($items) === 0)
-    <div class="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <p class="text-sm font-medium text-gray-500">Aucune opération</p>
-        <p class="text-xs text-gray-400 mt-1">
-            Les transactions et décaissements apparaîtront ici.
-        </p>
-    </div>
-@else
-    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+<div class="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
-                <tr class="border-b border-gray-100 bg-gray-50">
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        Type
-                    </th>
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        ID
-                    </th>
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        Détails
-                    </th>
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        Montant
-                    </th>
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        Statut
-                    </th>
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        Date
-                    </th>
-                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-400">
-                        Action
-                    </th>
+                <tr class="text-left text-xs text-slate-400 border-b border-slate-100 bg-slate-50/60">
+                    <th class="px-5 py-3 font-medium">Identifiant</th>
+                    @if($type === 'collections')
+                        <th class="px-5 py-3 font-medium">Commande</th>
+                        <th class="px-5 py-3 font-medium">Client</th>
+                    @elseif($type === 'disbursements')
+                        <th class="px-5 py-3 font-medium">Référence</th>
+                        <th class="px-5 py-3 font-medium">Bénéficiaire</th>
+                    @else
+                        <th class="px-5 py-3 font-medium">Libellé</th>
+                        <th class="px-5 py-3 font-medium">Bénéficiaires</th>
+                    @endif
+                    <th class="px-5 py-3 font-medium">Marchand</th>
+                    <th class="px-5 py-3 font-medium text-right">Montant</th>
+                    <th class="px-5 py-3 font-medium text-right">Frais</th>
+                    <th class="px-5 py-3 font-medium">Statut</th>
+                    <th class="px-5 py-3 font-medium">Date</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-50">
-                @foreach($items as $item)
-                    <tr class="hover:bg-gray-50 transition">
-
-                        {{-- Type --}}
-                        <td class="px-6 py-4">
-                            @if($item['type'] === 'COLLECTION')
-                                <span class="text-xs px-2 py-1 rounded-full font-medium
-                                             bg-green-100 text-green-700">
-                                    ↓ Collection
-                                </span>
-                            @elseif($item['type'] === 'DISBURSEMENT')
-                                <span class="text-xs px-2 py-1 rounded-full font-medium
-                                             bg-blue-100 text-red-800">
-                                    ↑ Décaissement
-                                </span>
-                            @else
-                                <span class="text-xs px-2 py-1 rounded-full font-medium
-                                             bg-purple-100 text-orange-700">
-                                    ↑↑ Masse
-                                </span>
-                            @endif
+            <tbody>
+                @forelse($items as $row)
+                    @php
+                        $id     = $row->{$idCol};
+                        $amount = $type === 'bulks' ? $row->total_amount : $row->amount;
+                    @endphp
+                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                        <td class="px-5 py-3.5">
+                            <a href="{{ route('portal.transactions.show', [$id, 'type' => $type]) }}"
+                               class="font-mono text-xs font-medium text-[#b13a7e] hover:underline">{{ $id }}</a>
                         </td>
-
-                        {{-- ID --}}
-                        <td class="px-6 py-4">
-                            <p class="font-mono text-xs text-gray-600">
-                                {{ $item['id'] }}
-                            </p>
-                        </td>
-
-                        {{-- Détails --}}
-                        <td class="px-6 py-4">
-                            @if($item['type'] === 'BULK_PAYMENT')
-                                <p class="text-xs font-medium text-gray-700">
-                                    {{ $item['label'] }}
-                                </p>
-                                <p class="text-xs text-gray-400 mt-0.5">
-                                    {{ $item['recipients'] }} bénéficiaires
-                                </p>
-                            @else
-                                <p class="text-xs text-gray-600">
-                                    {{ $item['phone'] }}
-                                </p>
-                                <p class="text-xs text-gray-400 mt-0.5">
-                                    {{ $item['reference'] ?? '—' }}
-                                </p>
-                            @endif
-                        </td>
-
-                        {{-- Montant --}}
-                        <td class="px-6 py-4">
-                            <p class="text-sm font-semibold
-                                {{ $item['type'] === 'COLLECTION'
-                                    ? 'text-green-600'
-                                    : ($item['type'] === 'DISBURSEMENT'
-                                        ? 'text-red-800'
-                                        : 'text-orange-800') }}">
-                                {{ $item['type'] === 'COLLECTION' ? '+' : '-' }}
-                                {{ number_format($item['amount'], 0, ',', ' ') }} XOF
-                            </p>
-                            <p class="text-xs text-gray-400 mt-0.5">
-                                Frais : {{ number_format($item['many_fee'], 0, ',', ' ') }} XOF
-                            </p>
-                            @if($item['type'] === 'COLLECTION')
-                                <p class="text-xs mt-0.5" style="color:#b13a7e;">
-                                    Net : {{ number_format($item['net'], 0, ',', ' ') }} XOF
-                                </p>
-                            @endif
-                        </td>
-
-                        {{-- Statut --}}
-                        <td class="px-6 py-4">
-                            @php
-                                $colors = [
-                                    'PENDING'    => 'bg-yellow-100 text-yellow-700',
-                                    'PROCESSING' => 'bg-blue-100 text-blue-700',
-                                    'SUCCESS'    => 'bg-green-100 text-green-700',
-                                    'COMPLETED'  => 'bg-green-100 text-green-700',
-                                    'FAILED'     => 'bg-red-100 text-red-700',
-                                    'REFUNDED'   => 'bg-gray-100 text-gray-500',
-                                ];
-                            @endphp
-                            <span class="text-xs px-2 py-1 rounded-full font-medium
-                                {{ $colors[$item['status']] ?? 'bg-gray-100 text-gray-500' }}">
-                                {{ $item['status'] }}
-                            </span>
-                        </td>
-
-                        {{-- Date --}}
-                        <td class="px-6 py-4">
-                            <p class="text-xs text-gray-600">
-                                {{ \Carbon\Carbon::parse($item['created_at'])->format('d/m/Y') }}
-                            </p>
-                            <p class="text-xs text-gray-400">
-                                {{ \Carbon\Carbon::parse($item['created_at'])->format('H:i') }}
-                            </p>
-                        </td>
-
-                        {{-- Action --}}
-                        <td class="px-6 py-4">
-                            <a href="{{ route('portal.transactions.show', $item['id']) }}"
-                               class="text-xs hover:underline"
-                               style="color:#b13a7e;">
-                                Détail
-                            </a>
+                        @if($type === 'collections')
+                            <td class="px-5 py-3.5">{{ $row->order_reference ?: '—' }}</td>
+                            <td class="px-5 py-3.5 text-slate-600">{{ $row->customer_phone ?: '—' }}</td>
+                        @elseif($type === 'disbursements')
+                            <td class="px-5 py-3.5">{{ $row->reference ?: '—' }}</td>
+                            <td class="px-5 py-3.5 text-slate-600">{{ $row->recipient_phone }}</td>
+                        @else
+                            <td class="px-5 py-3.5">{{ $row->label }}</td>
+                            <td class="px-5 py-3.5 text-slate-600 tabular">{{ $row->success_count }}/{{ $row->total_recipients }}</td>
+                        @endif
+                        <td class="px-5 py-3.5 text-slate-600">{{ $names[$row->sub_merchant_id] ?? '—' }}</td>
+                        <td class="px-5 py-3.5 text-right font-semibold tabular whitespace-nowrap">{{ $money($amount) }} XOF</td>
+                        <td class="px-5 py-3.5 text-right text-slate-500 tabular whitespace-nowrap">{{ $money($row->many_fee) }}</td>
+                        <td class="px-5 py-3.5">@include('portal.partials.badge', ['status' => $row->status])</td>
+                        <td class="px-5 py-3.5 text-slate-500 whitespace-nowrap">{{ \Carbon\Carbon::parse($row->created_at)->format('d/m/Y H:i') }}</td>
+                    </tr>
+                @empty
+                    <tr>
+                        <td colspan="8" class="px-5 py-16 text-center text-slate-400">
+                            @include('portal.partials.icon', ['name' => 'swap', 'class' => 'w-8 h-8 mx-auto mb-2'])
+                            <p class="text-sm">Aucun résultat.</p>
                         </td>
                     </tr>
-                @endforeach
+                @endforelse
             </tbody>
         </table>
-
-        {{-- Pagination --}}
-        <div class="px-6 py-4 border-t border-gray-100 flex items-center
-                    justify-between text-xs text-gray-400">
-            <span>{{ $total }} opération(s) au total</span>
-            <div class="flex space-x-2">
-                @if($page > 1)
-                    <a href="{{ request()->fullUrlWithQuery(['page' => $page - 1]) }}"
-                       class="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50">
-                        ← Précédent
-                    </a>
-                @endif
-                @if($page * $perPage < $total)
-                    <a href="{{ request()->fullUrlWithQuery(['page' => $page + 1]) }}"
-                       class="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50">
-                        Suivant →
-                    </a>
-                @endif
-            </div>
-        </div>
     </div>
-@endif
+
+    @if($items->hasPages())
+        <div class="px-5 py-4 border-t border-slate-100">{{ $items->links() }}</div>
+    @endif
+</div>
 
 @endsection

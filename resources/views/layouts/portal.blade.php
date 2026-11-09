@@ -1,145 +1,173 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" class="h-full">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>@yield('title', 'Many — Portail Développeur')</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <title>@yield('title', 'Portail Many')</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    {{-- Remplacez cette ligne par vos assets compilés (@vite) si vous préférez : aucune configuration Tailwind n'est requise --}}
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        :root {
-            --color-primary: #b13a7e;
-            --color-primary-light: #f9eef5;
-            --color-primary-dark: #8e2e64;
-        }
-        .bg-primary { background-color: var(--color-primary); }
-        .text-primary { color: var(--color-primary); }
-        .border-primary { border-color: var(--color-primary); }
-        .bg-primary-light { background-color: var(--color-primary-light); }
-        .hover\:bg-primary-dark:hover { background-color: var(--color-primary-dark); }
-        .nav-active { background-color: var(--color-primary-light); color: var(--color-primary); }
-        .nav-inactive { color: #4b5563; }
-        .nav-inactive:hover { background-color: #f9fafb; }
+        body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+        .tabular { font-variant-numeric: tabular-nums; }
     </style>
 </head>
-<body class="bg-gray-50 font-sans">
 
-    <div class="flex h-screen">
-        <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+@php
+    $__login = auth('aggregator')->user();
+    $__ctx   = app(\App\Domain\Auth\Services\PortalEnvironmentService::class)->resolve($__login);
+    $__prod  = $__ctx['env'] === 'production';
 
-            {{-- Logo --}}
-            <div class="h-16 flex items-center px-6 border-b border-gray-200">
-                <span class="text-xl font-bold text-primary">Many</span>
-                <span class="ml-2 text-xs px-2 py-0.5 rounded-full font-medium"
-                      style="background-color:#f9eef5; color:#b13a7e;">
-                    Portail
+    $__nav = [
+        ['portal.dashboard',          'Tableau de bord', 'home', request()->routeIs('portal.dashboard')],
+        ['portal.applications.index', 'Applications',    'cube', request()->routeIs('portal.applications.*') || request()->routeIs('portal.sub-merchants.*')],
+        ['portal.transactions.index', 'Transactions',    'swap', request()->routeIs('portal.transactions.*')],
+        ['portal.account.password',   'Mot de passe',    'key',  request()->routeIs('portal.account.*')],
+    ];
+@endphp
+
+<body class="h-full bg-slate-50 text-slate-900">
+
+{{-- Fond sombre du menu mobile --}}
+<div id="overlay" class="fixed inset-0 z-30 bg-black/50 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+{{-- ───────── Menu latéral ───────── --}}
+<aside id="sidebar"
+       class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full lg:translate-x-0 transition-transform duration-200
+              bg-neutral-950 text-neutral-300 flex flex-col">
+
+    <div class="h-16 flex items-center gap-3 px-6 border-b border-white/10">
+        <div class="h-9 w-9 rounded-xl bg-gradient-to-br from-[#d4569b] to-[#8f2b63] flex items-center justify-center text-white font-bold">M</div>
+        <div>
+            <p class="text-white font-semibold leading-none">Many</p>
+            <p class="text-[11px] text-neutral-500 mt-1">Portail agrégateur</p>
+        </div>
+    </div>
+
+    <nav class="flex-1 px-3 py-5 space-y-1">
+        @foreach($__nav as [$route, $label, $icon, $active])
+            <a href="{{ route($route) }}"
+               class="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition
+                      {{ $active ? 'bg-white/10 text-white' : 'text-neutral-400 hover:bg-white/5 hover:text-white' }}">
+                <span class="{{ $active ? 'text-[#e46aae]' : 'text-neutral-500 group-hover:text-neutral-300' }}">
+                    @include('portal.partials.icon', ['name' => $icon])
                 </span>
+                {{ $label }}
+            </a>
+        @endforeach
+    </nav>
+
+    <div class="p-4 border-t border-white/10">
+        <div class="flex items-center gap-3">
+            <div class="h-9 w-9 shrink-0 rounded-full bg-[#b13a7e] flex items-center justify-center text-white text-sm font-semibold">
+                {{ strtoupper(mb_substr($__login->legal_name, 0, 1)) }}
             </div>
-
-            {{-- Navigation --}}
-            <nav class="flex-1 px-4 py-6 space-y-1">
-
-                <a href="{{ route('portal.dashboard') }}"
-                   class="flex items-center px-3 py-2 rounded-lg text-sm font-medium
-                   {{ request()->routeIs('portal.dashboard') ? 'nav-active' : 'nav-inactive' }}">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-                    </svg>
-                    Dashboard
-                </a>
-
-              {{-- Remplacez le lien sous-marchands par --}}
-<a href="{{ route('portal.applications.index') }}"
-   class="flex items-center px-3 py-2 rounded-lg text-sm font-medium
-   {{ request()->routeIs('portal.applications.*') ||
-      request()->routeIs('portal.sub-merchants.*')
-      ? 'nav-active' : 'nav-inactive' }}">
-    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
-    </svg>
-    Applications & Marchands
-</a>
-
-<a href="{{ route('portal.transactions.index') }}"
-   class="flex items-center px-3 py-2 rounded-lg text-sm font-medium
-   {{ request()->routeIs('portal.transactions.*') ? 'nav-active' : 'nav-inactive' }}">
-    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-    </svg>
-    Transactions
-</a>
-
-            </nav>
-
-            {{-- Profil --}}
-            <div class="px-4 py-4 border-t border-gray-200">
-    <div class="flex items-center">
-        <div class="w-8 h-8 rounded-full flex items-center justify-center"
-             style="background-color:#f9eef5;">
-            <span class="text-sm font-bold text-primary">
-                {{ strtoupper(substr(auth('aggregator')->user()->legal_name ?? 'A', 0, 1)) }}
-            </span>
+            <div class="min-w-0">
+                <p class="text-sm text-white font-medium truncate">{{ $__login->legal_name }}</p>
+                <p class="text-xs text-neutral-500 truncate">{{ $__login->email }}</p>
+            </div>
         </div>
-        <div class="ml-3">
-            <p class="text-sm font-medium text-gray-800">
-                {{ auth('aggregator')->user()->legal_name ?? 'Agrégateur' }}
-            </p>
-            <p class="text-xs text-gray-400">
-                {{ ucfirst(strtolower(auth('aggregator')->user()->status ?? 'sandbox')) }}
-            </p>
-        </div>
-        <form method="POST" action="{{ route('portal.logout') }}" class="ml-auto">
+        <form method="POST" action="{{ route('portal.logout') }}" class="mt-3">
             @csrf
-            <button type="submit" class="text-gray-400 hover:text-red-500 transition">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-                </svg>
+            <button class="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-400 hover:bg-white/5 hover:text-white">
+                @include('portal.partials.icon', ['name' => 'logout', 'class' => 'w-4 h-4'])
+                Déconnexion
             </button>
         </form>
     </div>
-</div>
-          
+</aside>
 
-        </aside>
+{{-- ───────── Zone principale ───────── --}}
+<div class="lg:pl-64 min-h-full flex flex-col">
 
-        {{-- Contenu principal --}}
-        <div class="flex-1 flex flex-col overflow-hidden">
+    @unless($__prod)
+        <div class="bg-amber-400/90 text-amber-950 text-xs font-medium text-center py-1.5 px-4">
+            Mode test : les données et les montants sont fictifs. Aucune opération réelle n'est effectuée.
+        </div>
+    @endunless
 
-            <header class="h-16 bg-white border-b border-gray-200 flex items-center px-6">
-                <h1 class="text-lg font-semibold text-gray-900">
-                    @yield('page_title', 'Dashboard')
-                </h1>
-                <div class="ml-auto">
-                    <span class="text-xs px-3 py-1 rounded-full font-medium"
-                          style="background-color:#f9eef5; color:#b13a7e;">
-                        Sandbox
-                    </span>
-                </div>
-            </header>
-
-            <div class="px-6 pt-4">
-                @if(session('success'))
-                    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 text-sm">
-                        {{ session('success') }}
-                    </div>
-                @endif
-                @if(session('error'))
-                    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
-                        {{ session('error') }}
-                    </div>
-                @endif
+    <header class="sticky top-0 z-20 bg-white/80 backdrop-blur border-b border-slate-200">
+        <div class="h-16 px-4 sm:px-8 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3 min-w-0">
+                <button type="button" class="lg:hidden p-2 -ml-2 text-slate-500" onclick="toggleSidebar()" aria-label="Menu">
+                    @include('portal.partials.icon', ['name' => 'menu', 'class' => 'w-6 h-6'])
+                </button>
+                <h1 class="text-base font-semibold truncate">@yield('page_title', 'Portail')</h1>
             </div>
 
-            <main class="flex-1 overflow-y-auto px-6 py-4">
-                @yield('content')
-            </main>
-
+            <div class="flex items-center gap-3">
+                @if($__ctx['has_production'])
+                    <form method="POST" action="{{ route('portal.dashboard.environment') }}"
+                          class="inline-flex rounded-xl bg-slate-100 p-1 text-xs font-semibold">
+                        @csrf
+                        <button name="env" value="sandbox"
+                                class="px-3 py-1.5 rounded-lg transition {{ !$__prod ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-800' }}">
+                            Test
+                        </button>
+                        <button name="env" value="production"
+                                class="px-3 py-1.5 rounded-lg transition {{ $__prod ? 'bg-[#b13a7e] shadow text-white' : 'text-slate-500 hover:text-slate-800' }}">
+                            Production
+                        </button>
+                    </form>
+                @else
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+                        <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span> Mode test
+                    </span>
+                @endif
+            </div>
         </div>
-    </div>
+    </header>
 
+    <main class="flex-1 px-4 sm:px-8 py-8 w-full max-w-7xl mx-auto">
+        @if(session('success'))
+            <div class="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                @include('portal.partials.icon', ['name' => 'check', 'class' => 'w-5 h-5 mt-0.5 shrink-0'])
+                <span>{{ session('success') }}</span>
+            </div>
+        @endif
+        @if(session('error'))
+            <div class="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{{ session('error') }}</div>
+        @endif
+        @if($errors->any())
+            <div class="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <ul class="list-disc pl-5 space-y-0.5">
+                    @foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach
+                </ul>
+            </div>
+        @endif
+
+        @yield('content')
+    </main>
+
+    <footer class="px-8 py-6 text-center text-xs text-slate-400">Many Paiement · Portail agrégateur</footer>
+</div>
+
+<script>
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('-translate-x-full');
+        document.getElementById('overlay').classList.toggle('hidden');
+    }
+
+    function copyText(text, button) {
+        const done = () => {
+            const old = button.textContent;
+            button.textContent = 'Copié ✓';
+            setTimeout(() => button.textContent = old, 1500);
+        };
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(done);
+        } else {
+            const t = document.createElement('textarea');
+            t.value = text; document.body.appendChild(t); t.select();
+            document.execCommand('copy'); document.body.removeChild(t); done();
+        }
+    }
+</script>
+@stack('scripts')
 </body>
 </html>

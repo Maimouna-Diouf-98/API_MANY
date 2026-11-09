@@ -4,16 +4,17 @@ namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\View;
+use App\Domain\Auth\Services\PortalEnvironmentService;
 
 class AppServiceProvider extends ServiceProvider
 {
     /**
      * Register any application services.
      */
-    public function register(): void
-    {
-        //
-    }
+   public function register(): void
+{
+    $this->app->singleton(PortalEnvironmentService::class);
+}
 
     /**
      * Bootstrap any application services.

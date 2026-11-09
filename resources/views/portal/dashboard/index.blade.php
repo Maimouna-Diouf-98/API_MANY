@@ -1,411 +1,332 @@
 @extends('layouts.portal')
 
-@section('title', 'Dashboard — Many Portail')
-@section('page_title', 'Dashboard')
+@section('title', 'Tableau de bord — Many')
+@section('page_title', 'Tableau de bord')
 
 @section('content')
 
-{{-- Bienvenue + statut --}}
-<div class="flex items-center justify-between mb-8">
+@php
+    $isProd = $env === 'production';
+    $money  = fn ($v) => number_format((float) $v, 0, ',', ' ');
+    $c      = $activity['counts'];
+    $rate   = $activity['success_rate'];
+    $tr     = $activity['trends'];
+
+    $typeMeta = [
+        'COLLECTION'   => ['Collection',        'bg-emerald-50 text-emerald-600', 'arrow-d'],
+        'DISBURSEMENT' => ['Décaissement',      'bg-blue-50 text-blue-600',       'arrow-u'],
+        'BULK'         => ['Paiement de masse', 'bg-violet-50 text-violet-600',   'arrow-u'],
+    ];
+    $typeRoute = ['COLLECTION' => 'collections', 'DISBURSEMENT' => 'disbursements', 'BULK' => 'bulks'];
+@endphp
+
+{{-- ───────── En-tête ───────── --}}
+<div class="flex flex-wrap items-end justify-between gap-4 mb-8">
     <div>
-        <h2 class="text-lg font-bold text-gray-900">
-            Bonjour, {{ $aggregator->legal_name }} 👋🏾
-        </h2>
-        <p class="text-sm text-gray-400 mt-0.5">
-            Voici un aperçu de votre espace agrégateur Many.
+        <p class="text-sm text-slate-500">{{ $isProd ? 'Compte de production' : 'Environnement de test' }}</p>
+        <h2 class="text-2xl font-bold tracking-tight">Bonjour, {{ $aggregator->legal_name }}</h2>
+    </div>
+    <div class="flex flex-wrap gap-2">
+        <a href="{{ route('portal.applications.index') }}"
+           class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold ring-1 ring-inset ring-slate-300 hover:bg-slate-50">
+            @include('portal.partials.icon', ['name' => 'cube', 'class' => 'w-4 h-4']) Applications
+        </a>
+        <a href="{{ route('portal.transactions.index') }}"
+           class="inline-flex items-center gap-2 rounded-xl bg-[#b13a7e] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#9a3069]">
+            @include('portal.partials.icon', ['name' => 'swap', 'class' => 'w-4 h-4']) Transactions
+        </a>
+    </div>
+</div>
+
+@if($isProd && $envAggregator->status !== 'PRODUCTION_ACTIVE')
+    <div class="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        Votre compte de production est <strong>{{ $envAggregator->status }}</strong>.
+        Contactez l'équipe Many pour plus d'informations.
+    </div>
+@endif
+
+{{-- ───────── Mode test : progression + demande de production ───────── --}}
+@unless($isProd)
+    @php
+        $steps = [
+            ['Compte créé',       true],
+            ['Tests réalisés',    $c['collections'] > 0],
+            ['Demande envoyée',   (bool) $productionRequest],
+            ['Production active', $hasProduction],
+        ];
+    @endphp
+
+    <div class="grid lg:grid-cols-3 gap-6 mb-8">
+        <div class="lg:col-span-2 rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+            <h3 class="font-semibold mb-6">Votre progression</h3>
+            <div class="flex items-start">
+                @foreach($steps as $i => [$label, $done])
+                    <div class="flex flex-col items-center text-center w-24 shrink-0">
+                        <div class="h-9 w-9 rounded-full flex items-center justify-center text-sm font-bold
+                                    {{ $done ? 'bg-[#b13a7e] text-white' : 'bg-slate-100 text-slate-400' }}">
+                            @if($done) @include('portal.partials.icon', ['name' => 'check', 'class' => 'w-4 h-4']) @else {{ $i + 1 }} @endif
+                        </div>
+                        <p class="text-xs mt-2 {{ $done ? 'text-slate-900 font-medium' : 'text-slate-400' }}">{{ $label }}</p>
+                    </div>
+                    @if(!$loop->last)
+                        <div class="flex-1 h-0.5 mt-[18px] {{ $done ? 'bg-[#b13a7e]/40' : 'bg-slate-200' }}"></div>
+                    @endif
+                @endforeach
+            </div>
+        </div>
+        <div class="lg:col-span-1">@include('portal.partials.production-request')</div>
+    </div>
+@endunless
+
+{{-- ───────── Indicateurs ───────── --}}
+<div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+
+    <div class="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-900 to-[#6b1f48] p-6 text-white shadow-sm">
+        <div class="flex items-center justify-between">
+            <p class="text-sm text-neutral-300">Solde {{ $isProd ? 'disponible' : 'fictif' }}</p>
+            @include('portal.partials.icon', ['name' => 'wallet', 'class' => 'w-5 h-5 text-[#e46aae]'])
+        </div>
+        <p class="mt-4 text-3xl font-bold tabular">{{ $money($data['balance']) }}</p>
+        <p class="text-xs text-neutral-400 mt-1">XOF</p>
+    </div>
+
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <div class="flex items-center justify-between">
+            <p class="text-sm text-slate-500">Collecté (7 jours)</p>
+            <span class="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                @include('portal.partials.icon', ['name' => 'arrow-d', 'class' => 'w-4 h-4'])
+            </span>
+        </div>
+        <p class="mt-4 text-2xl font-bold tabular">{{ $money($activity['week']['collected']) }} <span class="text-sm font-medium text-slate-400">XOF</span></p>
+        <p class="text-xs mt-1">
+            @if($tr['collected'] === null)
+                <span class="text-slate-400">Pas de période précédente</span>
+            @else
+                <span class="font-semibold {{ $tr['collected'] >= 0 ? 'text-emerald-600' : 'text-red-600' }}">
+                    {{ $tr['collected'] >= 0 ? '▲' : '▼' }} {{ abs($tr['collected']) }} %
+                </span>
+                <span class="text-slate-400">vs 7 jours précédents</span>
+            @endif
         </p>
     </div>
-    <div class="flex items-center space-x-3">
-        {{-- Statut --}}
-        @if($aggregator->status === 'SANDBOX_ACTIVE')
-            <span class="text-xs px-3 py-1 rounded-full font-medium
-                         bg-yellow-100 text-yellow-700">
-                🧪 Sandbox
+
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <div class="flex items-center justify-between">
+            <p class="text-sm text-slate-500">Décaissé (7 jours)</p>
+            <span class="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                @include('portal.partials.icon', ['name' => 'arrow-u', 'class' => 'w-4 h-4'])
             </span>
+        </div>
+        <p class="mt-4 text-2xl font-bold tabular">{{ $money($activity['week']['disbursed']) }} <span class="text-sm font-medium text-slate-400">XOF</span></p>
+        <p class="text-xs mt-1">
+            @if($tr['disbursed'] === null)
+                <span class="text-slate-400">Pas de période précédente</span>
+            @else
+                <span class="font-semibold {{ $tr['disbursed'] >= 0 ? 'text-emerald-600' : 'text-red-600' }}">
+                    {{ $tr['disbursed'] >= 0 ? '▲' : '▼' }} {{ abs($tr['disbursed']) }} %
+                </span>
+                <span class="text-slate-400">vs 7 jours précédents</span>
+            @endif
+        </p>
+    </div>
+
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <div class="flex items-center justify-between">
+            <p class="text-sm text-slate-500">Taux de réussite</p>
+            <span class="h-8 w-8 rounded-lg bg-[#b13a7e]/10 text-[#b13a7e] flex items-center justify-center">
+                @include('portal.partials.icon', ['name' => 'check', 'class' => 'w-4 h-4'])
+            </span>
+        </div>
+        <p class="mt-4 text-2xl font-bold tabular">{{ $rate === null ? '—' : $rate . ' %' }}</p>
+        <div class="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+            <div class="h-full rounded-full bg-[#b13a7e]" style="width: {{ $rate ?? 0 }}%"></div>
+        </div>
+        <p class="text-xs text-slate-400 mt-2">{{ $c['collections'] }} réussie(s) sur {{ $c['collections_total'] }} collection(s)</p>
+    </div>
+</div>
+
+{{-- ───────── Totaux cumulés ───────── --}}
+<div class="grid sm:grid-cols-3 gap-4 mb-6">
+    <div class="rounded-2xl bg-white border border-slate-200 p-5">
+        <p class="text-xs text-slate-500">Total collecté</p>
+        <p class="text-lg font-bold mt-1 tabular">{{ $money($data['collected']) }} XOF</p>
+    </div>
+    <div class="rounded-2xl bg-white border border-slate-200 p-5">
+        <p class="text-xs text-slate-500">Total décaissé</p>
+        <p class="text-lg font-bold mt-1 tabular">{{ $money($data['disbursed']) }} XOF</p>
+    </div>
+    <div class="rounded-2xl bg-white border border-slate-200 p-5">
+        <p class="text-xs text-slate-500">Marchands actifs · Applications</p>
+        <p class="text-lg font-bold mt-1">{{ $activeSubMerchants }} · {{ $data['applications']->count() }}</p>
+    </div>
+</div>
+
+{{-- ───────── Graphiques ───────── --}}
+<div class="grid lg:grid-cols-3 gap-6 mb-6">
+    <div class="lg:col-span-2 rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold">Activité des 7 derniers jours</h3>
+            <div class="flex items-center gap-4 text-xs text-slate-500">
+                <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-[#b13a7e]"></span>Collecté</span>
+                <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-blue-500"></span>Décaissé</span>
+            </div>
+        </div>
+        <div class="h-72"><canvas id="activityChart"></canvas></div>
+    </div>
+
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <h3 class="font-semibold mb-4">Statut des collections</h3>
+        @if($c['collections_total'] > 0)
+            <div class="h-52 relative">
+                <canvas id="statusChart"></canvas>
+                <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <p class="text-2xl font-bold">{{ $c['collections_total'] }}</p>
+                    <p class="text-xs text-slate-400">collections</p>
+                </div>
+            </div>
+            <ul class="mt-4 space-y-2 text-sm">
+                @foreach([['SUCCESS','Réussies','bg-emerald-500'],['PENDING','En attente','bg-amber-500'],['FAILED','Échouées','bg-red-500'],['REFUNDED','Remboursées','bg-slate-400']] as [$k,$l,$col])
+                    <li class="flex items-center justify-between">
+                        <span class="inline-flex items-center gap-2 text-slate-600"><span class="h-2.5 w-2.5 rounded-full {{ $col }}"></span>{{ $l }}</span>
+                        <span class="font-semibold tabular">{{ $activity['breakdown'][$k] }}</span>
+                    </li>
+                @endforeach
+            </ul>
         @else
-            <span class="text-xs px-3 py-1 rounded-full font-medium
-                         bg-green-100 text-green-700">
-                ✅ Production
-            </span>
+            <div class="h-52 flex flex-col items-center justify-center text-center text-slate-400">
+                @include('portal.partials.icon', ['name' => 'swap', 'class' => 'w-8 h-8 mb-2'])
+                <p class="text-sm">Aucune collection pour l'instant.</p>
+            </div>
         @endif
     </div>
 </div>
 
-{{-- Progression Sandbox → Production --}}
-@if($aggregator->status === 'SANDBOX_ACTIVE')
-    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-8">
-        <h3 class="text-sm font-semibold text-gray-700 mb-6">
-            Votre progression
-        </h3>
-        <div class="flex items-center">
-            @php
-                $hasPendingRequest = $productionRequest && $productionRequest->status === 'PENDING';
-                $steps = [
-                    ['label' => 'Compte créé',       'done' => true],
-                    ['label' => 'Tests sandbox',      'done' => $totalCollections > 0],
-                    ['label' => 'Demande envoyée',    'done' => (bool) $productionRequest],
-                    ['label' => 'Production active',  'done' => false],
-                ];
-            @endphp
-            @foreach($steps as $i => $step)
-                <div class="flex flex-col items-center flex-1">
-                    <div class="w-9 h-9 rounded-full flex items-center justify-center
-                                text-xs font-bold
-                                {{ $step['done'] ? 'text-white' : 'bg-gray-100 text-gray-400' }}"
-                         style="{{ $step['done'] ? 'background-color:#b13a7e;' : '' }}">
-                        @if($step['done'])
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd"
-                                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                                      clip-rule="evenodd"/>
-                            </svg>
-                        @else
-                            {{ $i + 1 }}
-                        @endif
-                    </div>
-                    <p class="text-xs text-gray-500 mt-2 text-center">
-                        {{ $step['label'] }}
-                    </p>
-                </div>
-                @if(!$loop->last)
-                    <div class="flex-1 h-px mb-5
-                        {{ $step['done'] ? 'bg-pink-300' : 'bg-gray-200' }}">
-                    </div>
-                @endif
-            @endforeach
+{{-- ───────── Opérations récentes + applications ───────── --}}
+<div class="grid lg:grid-cols-3 gap-6">
+
+    <div class="lg:col-span-2 rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <h3 class="font-semibold">Opérations récentes</h3>
+            <a href="{{ route('portal.transactions.index') }}" class="text-sm font-medium text-[#b13a7e] hover:underline">Tout voir</a>
         </div>
 
-      {{-- Bouton demande production --}}
-@if(!$productionRequest || $productionRequest->status === 'REJECTED')
-
-    @if($productionRequest && $productionRequest->status === 'REJECTED')
-        <div class="mt-6 bg-red-50 border border-red-200 rounded-lg p-4">
-            <p class="text-sm font-medium text-red-800">
-                Votre précédente demande a été refusée.
-            </p>
-            <p class="text-xs text-red-600 mt-1">
-                Motif : {{ $productionRequest->admin_note }}
-            </p>
-        </div>
-    @endif
-
-    <div class="mt-6 pt-6 border-t border-gray-100 text-center">
-        <button type="button"
-                onclick="document.getElementById('modal-production').classList.remove('hidden')"
-                class="px-6 py-2.5 rounded-lg text-sm font-medium text-white
-                       hover:opacity-90 transition"
-                style="background-color:#b13a7e;">
-            🚀 {{ $productionRequest ? 'Soumettre une nouvelle demande' : 'Demander l\'accès production' }}
-        </button>
-    </div>
-
-@elseif($productionRequest->status === 'PENDING')
-    <div class="mt-6 pt-6 border-t border-gray-100">
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-            <p class="text-sm font-medium text-yellow-800">
-                ⏳ Demande en cours de traitement
-            </p>
-            <p class="text-xs text-yellow-600 mt-1">
-                L'équipe Many examine votre dossier et vous contactera
-                par email sous 24-48h.
-            </p>
-        </div>
-    </div>
-@elseif($productionRequest->status === 'APPROVED')
-    <div class="mt-6 pt-6 border-t border-gray-100">
-        <div class="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-            <p class="text-sm font-medium text-green-800">
-                ✅ Accès production approuvé !
-            </p>
-            <p class="text-xs text-green-600 mt-1">
-                Vérifiez votre email pour vos credentials production.
-            </p>
-        </div>
-    </div>
-@endif
-    </div>
-@endif
-
-{{-- Cartes statistiques --}}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-
-    {{-- Balance --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-5 col-span-2 md:col-span-1">
-        <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium text-gray-500">Balance Many</span>
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                 style="background-color:#f9eef5;">
-                <svg class="w-3.5 h-3.5" style="color:#b13a7e;" fill="none"
-                     stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-            </div>
-        </div>
-        <p class="text-2xl font-bold text-gray-900">
-            {{ number_format($balance, 0, ',', ' ') }}
-        </p>
-        <p class="text-xs text-gray-400 mt-1">XOF disponible</p>
-    </div>
-
-    {{-- Collections --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium text-gray-500">Collections</span>
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center
-                        bg-green-50">
-                <svg class="w-3.5 h-3.5 text-green-500" fill="none"
-                     stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
-                </svg>
-            </div>
-        </div>
-        <p class="text-2xl font-bold text-gray-900">{{ $totalCollections }}</p>
-        <p class="text-xs text-gray-400 mt-1">
-            {{ number_format($totalVolume, 0, ',', ' ') }} XOF
-        </p>
-    </div>
-
-    {{-- Décaissements --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium text-gray-500">Décaissements</span>
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center
-                        bg-blue-50">
-                <svg class="w-3.5 h-3.5 text-blue-500" fill="none"
-                     stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M5 10l7-7m0 0l7 7M12 3v18"/>
-                </svg>
-            </div>
-        </div>
-        <p class="text-2xl font-bold text-gray-900">
-            {{ $totalDisbursements + $totalBulk }}
-        </p>
-        <p class="text-xs text-gray-400 mt-1">
-            {{ number_format($totalDecaisse, 0, ',', ' ') }} XOF
-        </p>
-    </div>
-
-    {{-- Sous-marchands --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-        <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium text-gray-500">Marchands</span>
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                 style="background-color:#f9eef5;">
-                <svg class="w-3.5 h-3.5" style="color:#b13a7e;" fill="none"
-                     stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                </svg>
-            </div>
-        </div>
-        <p class="text-2xl font-bold text-gray-900">{{ $totalSubMerchants }}</p>
-        <p class="text-xs text-gray-400 mt-1">Marchands actifs</p>
-    </div>
-
-</div>
-
-{{-- Graphique --}}
-<div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-    <h3 class="text-sm font-semibold text-gray-700 mb-4">
-        Activité des 7 derniers jours
-    </h3>
-    <canvas id="activityChart" height="80"></canvas>
-</div>
-
-{{-- Transactions récentes --}}
-<div class="bg-white rounded-xl border border-gray-200 p-6">
-    <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-semibold text-gray-700">Transactions récentes</h3>
-        <a href="{{ route('portal.transactions.index') }}"
-           class="text-xs hover:underline" style="color:#b13a7e;">
-            Voir toutes →
-        </a>
-    </div>
-
-    @if($recentTransactions->isEmpty())
-        <p class="text-sm text-gray-400 text-center py-6">
-            Aucune transaction pour l'instant.
-        </p>
-    @else
-        <div class="space-y-3">
-            @foreach($recentTransactions as $tx)
-                <div class="flex items-center justify-between py-3
-                            border-b border-gray-50 last:border-0">
-                    <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 rounded-full flex items-center justify-center
-                                    bg-green-100 text-green-600 text-xs font-bold">
-                            ↓
-                        </div>
-                        <div>
-                            <p class="text-xs font-mono text-gray-600">
-                                {{ $tx->transaction_id }}
-                            </p>
-                            <p class="text-xs text-gray-400 mt-0.5">
-                                {{ $tx->order_reference }} ·
-                                {{ $tx->created_at->format('d/m H:i') }}
-                            </p>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-3">
-                        <div class="text-right">
-                            <p class="text-sm font-semibold text-gray-900">
-                                {{ number_format($tx->amount, 0, ',', ' ') }} XOF
-                            </p>
-                            <p class="text-xs" style="color:#b13a7e;">
-                                Net : {{ number_format($tx->net_to_aggregator, 0, ',', ' ') }} XOF
-                            </p>
-                        </div>
-                        @php
-                            $colors = [
-                                'PENDING'  => 'bg-yellow-100 text-yellow-700',
-                                'SUCCESS'  => 'bg-green-100 text-green-700',
-                                'FAILED'   => 'bg-red-100 text-red-700',
-                                'REFUNDED' => 'bg-gray-100 text-gray-500',
-                            ];
-                        @endphp
-                        <span class="text-xs px-2 py-0.5 rounded-full font-medium
-                            {{ $colors[$tx->status] ?? 'bg-gray-100 text-gray-500' }}">
-                            {{ $tx->status }}
-                        </span>
+        @forelse($activity['recent'] as $op)
+            @php [$label, $iconCls, $icon] = $typeMeta[$op['type']]; @endphp
+            <a href="{{ route('portal.transactions.show', [$op['id'], 'type' => $typeRoute[$op['type']]]) }}"
+               class="flex items-center justify-between gap-4 px-6 py-3.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="h-9 w-9 shrink-0 rounded-xl flex items-center justify-center {{ $iconCls }}">
+                        @include('portal.partials.icon', ['name' => $icon, 'class' => 'w-4 h-4'])
+                    </span>
+                    <div class="min-w-0">
+                        <p class="text-sm font-medium truncate">{{ $label }} <span class="font-mono text-xs text-slate-400 ml-1">{{ $op['id'] }}</span></p>
+                        <p class="text-xs text-slate-400 truncate">{{ $op['label'] ?: '—' }} · {{ $op['created_at']->format('d/m/Y H:i') }}</p>
                     </div>
                 </div>
-            @endforeach
-        </div>
-    @endif
-</div>
+                <div class="flex items-center gap-4 shrink-0">
+                    <p class="text-sm font-semibold tabular">{{ $money($op['amount']) }} <span class="text-xs text-slate-400">XOF</span></p>
+                    @include('portal.partials.badge', ['status' => $op['status']])
+                </div>
+            </a>
+        @empty
+            <div class="px-6 py-14 text-center text-slate-400">
+                @include('portal.partials.icon', ['name' => 'swap', 'class' => 'w-8 h-8 mx-auto mb-2'])
+                <p class="text-sm">Aucune opération pour l'instant.</p>
+                <p class="text-xs mt-1">Elles apparaîtront ici dès votre premier appel à l'API.</p>
+            </div>
+        @endforelse
+    </div>
 
-{{-- Modal demande production --}}
-<div id="modal-production"
-     class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center
-            justify-center z-50">
-    <div class="bg-white rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-sm font-semibold text-gray-900">
-                🚀 Demande d'accès production
-            </h2>
-            <button onclick="document.getElementById('modal-production').classList.add('hidden')"
-                    class="text-gray-400 hover:text-gray-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round"
-                          stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <h3 class="font-semibold">Mes applications</h3>
+            <a href="{{ route('portal.applications.index') }}" class="text-sm font-medium text-[#b13a7e] hover:underline">Gérer</a>
         </div>
 
-        <p class="text-sm text-gray-500 mb-4">
-            En soumettant cette demande, l'équipe Many sera notifiée.
-            Vous recevrez vos credentials production par email sous 24-48h.
-        </p>
-
-        <div class="bg-gray-50 rounded-lg p-4 mb-4">
-            <p class="text-xs text-gray-400 mb-2">Ce que vous recevrez par email :</p>
-            <ul class="text-xs text-gray-600 space-y-1">
-                <li>✓ Votre client_id production (agg_live_xxx)</li>
-                <li>✓ Votre client_secret production</li>
-                <li>✓ Un nouveau mot de passe portail</li>
-                <li>✓ La possibilité de modifier votre mot de passe</li>
-            </ul>
-        </div>
-
-        <textarea id="production-message"
-                  placeholder="Message optionnel pour l'équipe Many..."
-                  rows="3"
-                  class="w-full px-4 py-2.5 border border-gray-300 rounded-lg
-                         text-sm mb-4 resize-none"></textarea>
-
-        <div class="flex space-x-3">
-            <button type="button"
-                    onclick="document.getElementById('modal-production').classList.add('hidden')"
-                    class="flex-1 py-2.5 rounded-lg text-sm font-medium
-                           border border-gray-300 text-gray-600">
-                Annuler
-            </button>
-            <button type="button"
-                    onclick="submitProductionRequest()"
-                    class="flex-1 py-2.5 rounded-lg text-sm font-medium text-white"
-                    style="background-color:#b13a7e;">
-                Envoyer la demande
-            </button>
-        </div>
+        @forelse($data['applications']->take(4) as $app)
+            <div class="px-6 py-3.5 border-b border-slate-50 last:border-0">
+                <div class="flex items-center justify-between gap-2">
+                    <a href="{{ route('portal.applications.show', $app->id) }}" class="text-sm font-medium hover:underline truncate">{{ $app->name }}</a>
+                    @include('portal.partials.badge', ['status' => $app->is_active ? 'ACTIVE' : 'CLOSED'])
+                </div>
+                <div class="mt-1.5 flex items-center justify-between gap-2">
+                    <code class="text-xs text-slate-500 truncate">{{ $app->client_id }}</code>
+                    <button type="button" onclick="copyText('{{ $app->client_id }}', this)"
+                            class="text-xs font-medium text-[#b13a7e] hover:underline shrink-0">Copier</button>
+                </div>
+            </div>
+        @empty
+            <div class="px-6 py-10 text-center text-slate-400">
+                <p class="text-sm">Aucune application.</p>
+                <a href="{{ route('portal.applications.index') }}" class="inline-block mt-3 text-sm font-semibold text-[#b13a7e] hover:underline">Créer ma première application</a>
+            </div>
+        @endforelse
     </div>
 </div>
 
-{{-- Chart.js --}}
+@endsection
+
+@push('scripts')
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-    // Graphique activité
-    const ctx = document.getElementById('activityChart').getContext('2d');
-    new Chart(ctx, {
+    const fmt = v => new Intl.NumberFormat('fr-FR').format(v);
+
+    // Dégradé sous la courbe
+    function gradient(ctx, rgb) {
+        const g = ctx.createLinearGradient(0, 0, 0, 280);
+        g.addColorStop(0, `rgba(${rgb}, 0.25)`);
+        g.addColorStop(1, `rgba(${rgb}, 0)`);
+        return g;
+    }
+
+    const lineCtx = document.getElementById('activityChart').getContext('2d');
+    new Chart(lineCtx, {
         type: 'line',
         data: {
-            labels: @json($chartData['labels']),
+            labels: @json($activity['chart']['labels']),
             datasets: [
                 {
-                    label: 'Collections (XOF)',
-                    data: @json($chartData['collections']),
-                    borderColor: '#b13a7e',
-                    backgroundColor: 'rgba(177, 58, 126, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4,
+                    label: 'Collecté',
+                    data: @json($activity['chart']['collections']),
+                    borderColor: '#b13a7e', backgroundColor: gradient(lineCtx, '177, 58, 126'),
+                    borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 5,
                 },
                 {
-                    label: 'Décaissements (XOF)',
-                    data: @json($chartData['disbursements']),
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4,
+                    label: 'Décaissé',
+                    data: @json($activity['chart']['disbursements']),
+                    borderColor: '#3b82f6', backgroundColor: gradient(lineCtx, '59, 130, 246'),
+                    borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 5,
                 },
             ],
         },
         options: {
-            responsive: true,
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { position: 'top' },
+                legend: { display: false },
+                tooltip: { callbacks: { label: c => ` ${c.dataset.label} : ${fmt(c.parsed.y)} XOF` } },
             },
             scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return new Intl.NumberFormat('fr-FR').format(value) + ' XOF';
-                        }
-                    }
-                }
-            }
+                x: { grid: { display: false }, border: { display: false } },
+                y: { beginAtZero: true, border: { display: false }, grid: { color: '#f1f5f9' },
+                     ticks: { callback: v => fmt(v) } },
+            },
         },
     });
 
-    // Soumettre demande production
-    function submitProductionRequest() {
-        const message = document.getElementById('production-message').value;
-
-        fetch("{{ route('portal.dashboard.request.production') }}", {
-            method: 'POST',
-            headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-            },
-            body: JSON.stringify({ message }),
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                document.getElementById('modal-production').classList.add('hidden');
-                alert('✅ ' + data.message);
-                window.location.reload();
-            } else {
-                alert('❌ ' + data.message);
-            }
-        })
-        .catch(() => alert('Erreur réseau. Réessayez.'));
-    }
+    @if($c['collections_total'] > 0)
+    new Chart(document.getElementById('statusChart').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: ['Réussies', 'En attente', 'Échouées', 'Remboursées'],
+            datasets: [{
+                data: @json(array_values($activity['breakdown'])),
+                backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#94a3b8'],
+                borderWidth: 0,
+            }],
+        },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '74%', plugins: { legend: { display: false } } },
+    });
+    @endif
 </script>
-
-@endsection
+@endpush

@@ -1,290 +1,175 @@
 @extends('layouts.portal')
 
-@section('title', 'Application — Many Portail')
-@section('page_title', $application->name )
+@section('title', $application->name . ' — Many')
+@section('page_title', 'Application')
 
 @section('content')
 
-<div class="max-w-4xl">
+@php
+    $isProd = $env === 'production';
+    $money  = fn ($v) => number_format((float) $v, 0, ',', ' ');
+@endphp
 
-    <a href="{{ route('portal.applications.index') }}"
-       class="text-sm hover:underline mb-6 inline-block"
-       style="color:#b13a7e;">
-        ← Retour aux applications
-    </a>
+<a href="{{ route('portal.applications.index') }}" class="text-sm text-slate-500 hover:text-slate-800">← Applications</a>
 
-    {{-- Alerte secret --}}
-    @if($plainSecret)
-        <div class="border rounded-xl p-4 mb-6"
-             style="background-color:#fff8e6; border-color:#f59e0b;">
-            <div class="flex items-start">
-                <span class="text-yellow-500 mr-3 mt-0.5 text-lg">⚠</span>
-                <div>
-                    <p class="text-sm font-semibold text-yellow-800">
-                        Notez votre client_secret maintenant
-                    </p>
-                    <p class="text-xs text-yellow-700 mt-1">
-                        Il ne sera plus jamais affiché après avoir quitté cette page.
-                    </p>
-                </div>
-            </div>
-        </div>
-    @endif
-
-    {{-- Infos application --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-sm font-semibold text-gray-700">
-                Informations de l'application
-            </h2>
-            <div class="flex items-center space-x-2">
-                <span class="text-xs px-2 py-0.5 rounded-full font-medium
-                    {{ $application->is_active
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-gray-100 text-gray-500' }}">
-                    {{ $application->is_active ? 'Active' : 'Inactive' }}
-                </span>
-                <span class="text-xs px-2 py-0.5 rounded-full font-medium"
-                      style="background-color:#f9eef5; color:#b13a7e;">
-                    {{ $application->environment }}
-                </span>
-            </div>
-        </div>
-
-        <div class="space-y-4">
-            {{-- Client ID --}}
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">client_id</label>
-                <div class="flex items-center space-x-2">
-                    <code class="flex-1 bg-gray-50 border border-gray-200 rounded-lg
-                                 px-3 py-2 text-xs font-mono text-gray-800">
-                        {{ $application->client_id }}
-                    </code>
-                    <button onclick="navigator.clipboard.writeText('{{ $application->client_id }}')"
-                            class="text-xs px-3 py-2 border border-gray-200
-                                   rounded-lg text-gray-500 hover:text-gray-700">
-                        Copier
-                    </button>
-                </div>
-            </div>
-
-            {{-- Client Secret --}}
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">client_secret</label>
-                @if($plainSecret)
-                    <div class="flex items-center space-x-2">
-                        <code class="flex-1 bg-yellow-50 border border-yellow-200
-                                     rounded-lg px-3 py-2 text-xs font-mono text-gray-800">
-                            {{ $plainSecret }}
-                        </code>
-                        <button onclick="navigator.clipboard.writeText('{{ $plainSecret }}')"
-                                class="text-xs px-3 py-2 border border-gray-200
-                                       rounded-lg text-gray-500 hover:text-gray-700">
-                            Copier
-                        </button>
-                    </div>
-                    <p class="text-xs text-yellow-600 mt-1">
-                        ⚠ Visible une seule fois
-                    </p>
-                @else
-                    <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                        <span class="text-xs font-mono text-gray-400">
-                            ••••••••••••••••••••••••••••••••
-                        </span>
-                    </div>
-                    <p class="text-xs text-gray-400 mt-1">
-                        Secret masqué. Supprimez et recréez l'application si vous l'avez perdu.
-                    </p>
-                @endif
-            </div>
-
-            {{-- Webhook --}}
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">webhook_url</label>
-                <div class="flex items-center space-x-2">
-                    <code class="flex-1 bg-gray-50 border border-gray-200 rounded-lg
-                                 px-3 py-2 text-xs font-mono text-gray-800">
-                        {{ $application->webhook_url }}
-                    </code>
-                    <button onclick="navigator.clipboard.writeText('{{ $application->webhook_url }}')"
-                            class="text-xs px-3 py-2 border border-gray-200
-                                   rounded-lg text-gray-500 hover:text-gray-700">
-                        Copier
-                    </button>
-                </div>
-            </div>
-
-            <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-                <p class="text-xs text-gray-400">
-                    Créée le {{ $application->created_at->format('d/m/Y à H:i') }}
-                </p>
-                <form method="POST"
-                      action="{{ route('portal.applications.destroy', $application->id) }}"
-                      onsubmit="return confirm('Supprimer cette application ?')">
-                    @csrf
-                    @method('DELETE')
-                    <button type="submit" class="text-xs text-red-500 hover:underline">
-                        Supprimer l'application
-                    </button>
-                </form>
-            </div>
-        </div>
+<div class="flex flex-wrap items-center justify-between gap-4 mt-3 mb-6">
+    <div class="flex items-center gap-3">
+        <h2 class="text-2xl font-bold tracking-tight">{{ $application->name }}</h2>
+        @include('portal.partials.badge', ['status' => $application->is_active ? 'ACTIVE' : 'CLOSED'])
     </div>
-
-    {{-- Sous-marchands --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-6">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-sm font-semibold text-gray-700">
-                Sous-marchands
-                <span class="ml-2 text-xs px-2 py-0.5 rounded-full font-medium"
-                      style="background-color:#f9eef5; color:#b13a7e;">
-                    {{ $subMerchants->count() }}
-                </span>
-            </h2>
-            <button onclick="document.getElementById('modal-sm').classList.remove('hidden')"
-                    class="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
-                    style="background-color:#b13a7e;">
-                + Ajouter un marchand
-            </button>
-        </div>
-
-        @if($subMerchants->isEmpty())
-            <div class="text-center py-8 border-2 border-dashed border-gray-200 rounded-xl">
-                <p class="text-sm text-gray-400">Aucun sous-marchand pour cette application.</p>
-                <button onclick="document.getElementById('modal-sm').classList.remove('hidden')"
-                        class="mt-2 text-sm font-medium hover:underline"
-                        style="color:#b13a7e;">
-                    Créer le premier →
-                </button>
-            </div>
-        @else
-            <div class="space-y-3">
-                @foreach($subMerchants as $sm)
-                    <a href="{{ route('portal.sub-merchants.show', [$application->id, $sm->id]) }}"
-                       class="flex items-center justify-between p-4 rounded-xl border
-                              border-gray-100 hover:border-gray-200 hover:bg-gray-50
-                              transition block">
-                        <div>
-                            <p class="text-sm font-medium text-gray-900">
-                                {{ $sm->legal_name }}
-                            </p>
-                            @if($sm->trade_name)
-                                <p class="text-xs text-gray-400">{{ $sm->trade_name }}</p>
-                            @endif
-                            <p class="text-xs text-gray-400 mt-0.5">
-                                {{ $sm->email }} · {{ $sm->phone }}
-                            </p>
-                        </div>
-                        <div class="flex items-center space-x-3">
-                            @php
-                                $colors = [
-                                    'PENDING'   => 'bg-yellow-100 text-yellow-700',
-                                    'ACTIVE'    => 'bg-green-100 text-green-700',
-                                    'SUSPENDED' => 'bg-orange-100 text-orange-700',
-                                    'CLOSED'    => 'bg-gray-100 text-gray-500',
-                                ];
-                            @endphp
-                            <span class="text-xs px-2 py-1 rounded-full font-medium
-                                {{ $colors[$sm->status] ?? 'bg-gray-100 text-gray-500' }}">
-                                {{ $sm->status }}
-                            </span>
-                            <svg class="w-4 h-4 text-gray-400"
-                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                      stroke-width="2" d="M9 5l7 7-7 7"/>
-                            </svg>
-                        </div>
-                    </a>
-                @endforeach
-            </div>
-        @endif
-    </div>
-
 </div>
 
-{{-- Modal création sous-marchand --}}
-<div id="modal-sm"
-     class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center
-            justify-center z-50 overflow-y-auto py-8">
-    <div class="bg-white rounded-xl p-6 w-full max-w-lg mx-4 shadow-xl">
-        <div class="flex items-center justify-between mb-6">
+{{-- Secret affiché une seule fois --}}
+@if(session('plain_secret'))
+    <div class="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-5">
+        <p class="font-semibold text-amber-900">Votre client_secret : à copier maintenant</p>
+        <p class="text-xs text-amber-800 mt-1">Il ne sera plus jamais affiché. En cas de perte, vous devrez en générer un nouveau.</p>
+        <div class="mt-3 flex items-center gap-2 rounded-xl bg-white ring-1 ring-amber-300 px-3 py-2">
+            <code class="text-sm break-all flex-1">{{ session('plain_secret') }}</code>
+            <button type="button" onclick="copyText('{{ session('plain_secret') }}', this)"
+                    class="text-xs font-semibold text-[#b13a7e] hover:underline shrink-0">Copier</button>
+        </div>
+    </div>
+@endif
+
+<div class="grid lg:grid-cols-3 gap-6 mb-6">
+
+    {{-- Identifiants --}}
+    <div class="lg:col-span-2 rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <h3 class="font-semibold mb-4">Identifiants API</h3>
+
+        <div class="space-y-4">
             <div>
-                <h2 class="text-sm font-semibold text-gray-900">
-                    Nouveau sous-marchand
-                </h2>
-                <p class="text-xs text-gray-400 mt-0.5">
-                    Application : {{ $application->name }}
-                </p>
+                <p class="text-xs font-medium text-slate-500 mb-1">client_id</p>
+                <div class="rounded-xl bg-slate-50 px-3 py-2.5 flex items-center justify-between gap-2">
+                    <code class="text-sm break-all">{{ $application->client_id }}</code>
+                    <button type="button" onclick="copyText('{{ $application->client_id }}', this)"
+                            class="text-xs font-medium text-[#b13a7e] hover:underline shrink-0">Copier</button>
+                </div>
             </div>
-            <button onclick="document.getElementById('modal-sm').classList.add('hidden')"
-                    class="text-gray-400 hover:text-gray-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round"
-                          stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
+            <div>
+                <p class="text-xs font-medium text-slate-500 mb-1">client_secret</p>
+                <div class="rounded-xl bg-slate-50 px-3 py-2.5 flex items-center justify-between gap-2">
+                    <code class="text-sm text-slate-400">••••••••••••••••••••••••••••••••</code>
+                    <form method="POST" action="{{ route('portal.applications.regenerate-secret', $application->id) }}"
+                          onsubmit="return confirm('Générer un nouveau secret ? L\'ancien cessera de fonctionner immédiatement et vos tokens en cours seront révoqués.');">
+                        @csrf
+                        <button class="text-xs font-medium text-[#b13a7e] hover:underline">Régénérer</button>
+                    </form>
+                </div>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-slate-500 mb-1">URL de webhook</p>
+                <p class="text-sm break-all">{{ $application->webhook_url }}</p>
+            </div>
+        </div>
+    </div>
+
+    {{-- Informations + zone sensible --}}
+    <div class="space-y-6">
+        <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+            <h3 class="font-semibold mb-4">Informations</h3>
+            <dl class="text-sm space-y-3">
+                <div class="flex justify-between"><dt class="text-slate-500">Environnement</dt><dd class="font-medium">{{ $isProd ? 'Production' : 'Test' }}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500">Créée le</dt><dd class="font-medium">{{ \Carbon\Carbon::parse($application->created_at)->format('d/m/Y') }}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500">Dernière utilisation</dt>
+                    <dd class="font-medium">{{ $application->last_used_at ? \Carbon\Carbon::parse($application->last_used_at)->format('d/m/Y H:i') : 'Jamais' }}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500">Sous-marchands</dt><dd class="font-medium">{{ $subMerchants->count() }}</dd></div>
+            </dl>
         </div>
 
-       <form method="POST"
-      action="{{ route('portal.sub-merchants.store', $application->id) }}"
-      class="space-y-4">
-    @csrf
+        <div class="rounded-2xl bg-white border border-red-200 p-6">
+            <h3 class="font-semibold text-red-700 mb-2">Zone sensible</h3>
 
-    <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-            Raison sociale
-        </label>
-        <input type="text" name="legal_name"
-               placeholder="Maya Store SARL"
-               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
-               required>
+            @if($isProd && !$application->is_active)
+                <p class="text-xs text-slate-500 mb-3">Application désactivée : elle ne peut plus s'authentifier.</p>
+                <form method="POST" action="{{ route('portal.applications.reactivate', $application->id) }}">
+                    @csrf
+                    <button class="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white bg-[#b13a7e] hover:bg-[#9a3069]">Réactiver l'application</button>
+                </form>
+            @else
+                <p class="text-xs text-slate-500 mb-3">
+                    @if($isProd)
+                        Désactiver coupe l'accès API. L'historique de vos opérations est conservé.
+                    @else
+                        La suppression retire l'application et ses sous-marchands de test.
+                    @endif
+                </p>
+                <form method="POST" action="{{ route('portal.applications.destroy', $application->id) }}"
+                      onsubmit="return confirm('{{ $isProd ? 'Désactiver cette application ?' : 'Supprimer cette application et ses sous-marchands ?' }}');">
+                    @csrf
+                    @method('DELETE')
+                    <button class="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-red-700 ring-1 ring-inset ring-red-300 hover:bg-red-50">
+                        {{ $isProd ? "Désactiver l'application" : "Supprimer l'application" }}
+                    </button>
+                </form>
+            @endif
+        </div>
+    </div>
+</div>
+
+{{-- Sous-marchands --}}
+<div class="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-semibold">Sous-marchands ({{ $subMerchants->count() }})</h3>
     </div>
 
-    <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-            Type d'activité
-        </label>
-        <input type="text" name="business_type"
-               placeholder="Ex: Commerce, Restaurant, Transport..."
-               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
-               required>
-    </div>
+    <details class="group border-b border-slate-100" {{ $errors->any() ? 'open' : '' }}>
+        <summary class="flex cursor-pointer list-none items-center gap-2 px-6 py-3 text-sm font-semibold text-[#b13a7e] hover:bg-slate-50">
+            @include('portal.partials.icon', ['name' => 'plus', 'class' => 'w-4 h-4']) Nouveau sous-marchand
+        </summary>
 
-    <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-            Adresse
-        </label>
-        <textarea name="address"
-                  placeholder="Dakar, Plateau, Rue 10"
-                  rows="2"
-                  class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
-                  required></textarea>
-    </div>
+        <form method="POST" action="{{ route('portal.sub-merchants.store', $application->id) }}" class="px-6 pb-6 pt-2 grid md:grid-cols-2 gap-4">
+            @csrf
+            @foreach([
+                ['legal_name',    'Raison sociale',   'text', 'Maya Store SARL'],
+                ['business_type', "Type d'activité",  'text', 'Commerce'],
+                ['address',       'Adresse',          'text', 'Dakar, Plateau, Rue 10'],
+                ['webhook_url',   'URL de webhook',   'url',  'https://marchand.sn/webhooks/many'],
+            ] as [$name, $label, $type, $placeholder])
+                <div>
+                    <label class="block text-xs font-medium text-slate-500 mb-1">{{ $label }}</label>
+                    <input type="{{ $type }}" name="{{ $name }}" value="{{ old($name) }}" required maxlength="500" placeholder="{{ $placeholder }}"
+                           class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#b13a7e]/40">
+                </div>
+            @endforeach
+            <div class="md:col-span-2 flex items-center justify-between gap-4">
+                <p class="text-xs text-slate-400">Le sous-marchand est créé « En attente » : activez-le pour qu'il puisse recevoir des opérations.</p>
+                <button class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#b13a7e] hover:bg-[#9a3069]" @disabled(!$application->is_active)>Créer</button>
+            </div>
+        </form>
+    </details>
 
-    <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-            URL de webhook
-        </label>
-        <input type="url" name="webhook_url"
-               placeholder="https://mayastore.sn/webhooks/many"
-               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
-               required>
-    </div>
-
-    <div class="flex space-x-3 pt-2">
-        <button type="button"
-                onclick="document.getElementById('modal-sm').classList.add('hidden')"
-                class="flex-1 py-2.5 rounded-lg text-sm font-medium
-                       border border-gray-300 text-gray-600">
-            Annuler
-        </button>
-        <button type="submit"
-                class="flex-1 py-2.5 rounded-lg text-sm font-medium text-white"
-                style="background-color:#b13a7e;">
-            Créer
-        </button>
-    </div>
-</form>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs text-slate-400 border-b border-slate-100">
+                    <th class="px-6 py-3 font-medium">Sous-marchand</th>
+                    <th class="px-6 py-3 font-medium">Statut</th>
+                    <th class="px-6 py-3 font-medium text-right">Collecté</th>
+                    <th class="px-6 py-3 font-medium text-right">Décaissé</th>
+                    <th class="px-6 py-3"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @forelse($subMerchants as $sm)
+                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                        <td class="px-6 py-3.5">
+                            <a href="{{ route('portal.sub-merchants.show', [$application->id, $sm['id']]) }}" class="font-medium hover:underline">{{ $sm['legal_name'] }}</a>
+                            <p class="text-xs text-slate-400">{{ $sm['business_type'] }} · {{ $sm['external_reference'] }}</p>
+                        </td>
+                        <td class="px-6 py-3.5">@include('portal.partials.badge', ['status' => $sm['status']])</td>
+                        <td class="px-6 py-3.5 text-right tabular whitespace-nowrap">{{ $money($sm['collected']) }} XOF</td>
+                        <td class="px-6 py-3.5 text-right tabular whitespace-nowrap">{{ $money($sm['disbursed']) }} XOF</td>
+                        <td class="px-6 py-3.5 text-right">
+                            <a href="{{ route('portal.sub-merchants.show', [$application->id, $sm['id']]) }}" class="text-xs font-semibold text-[#b13a7e] hover:underline">Détails →</a>
+                        </td>
+                    </tr>
+                @empty
+                    <tr><td colspan="5" class="px-6 py-12 text-center text-slate-400">Aucun sous-marchand pour cette application.</td></tr>
+                @endforelse
+            </tbody>
+        </table>
     </div>
 </div>
 

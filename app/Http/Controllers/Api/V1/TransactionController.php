@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Domain\Transactions\Models\Transaction;
 use App\Domain\Transactions\Models\RealTransaction;
 use App\Domain\Transactions\Services\TransactionService;
+use App\Support\CheckoutLinks;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -90,6 +91,7 @@ class TransactionController extends Controller
                 'qr_code'           => $qrCode,
                 'qr_code_format'    => 'base64/svg+xml',
                 'qr_expires_in'     => 600,
+                'checkout_url'      => CheckoutLinks::url($environment, $transaction->transaction_id, $transaction->created_at),
                 'created_at'        => $transaction->created_at,
             ], 201);
 

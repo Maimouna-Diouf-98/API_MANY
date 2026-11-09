@@ -186,6 +186,15 @@ dispatch(new SendPaymentNotificationJob(
         return $transaction;
     }
 
+/**
+ * QR code d'une collection, utilisé par la page de paiement (checkout).
+ * L'expiration est figée sur created_at + 10 min : recharger la page ne la prolonge pas.
+ */
+public function qrCodeFor(Transaction|RealTransaction $transaction): string
+{
+    return $this->generateQrCode($transaction);
+}
+
 private function generateQrCode(Transaction|RealTransaction $transaction): string
 {
     // Garde : une transaction sans agrégateur ne doit pas produire de QR
@@ -210,7 +219,7 @@ private function generateQrCode(Transaction|RealTransaction $transaction): strin
 
     $expiresAt = $transaction instanceof Transaction && $transaction->confirmation_expires_at
         ? $transaction->confirmation_expires_at->timestamp
-        : now()->addMinutes(10)->timestamp;
+        : $transaction->created_at->copy()->addMinutes(10)->timestamp;
 
     $payload = json_encode([
         // champs existants : inchangés

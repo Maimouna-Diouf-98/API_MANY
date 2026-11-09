@@ -136,6 +136,160 @@ class AggregatorStatsService
         ];
     }
 
+    /**
+     * Activité d'un agrégateur pour le dashboard du portail :
+     * compteurs d'opérations réussies, dernières opérations, courbe des 7 derniers jours.
+     */
+   
+    public function activity(string $env, string $aggregatorId, int $recentLimit = 8): array
+{
+    $db   = $this->db($env);
+    $okTx = $this->cfg($env)['tx_ok'];
+
+    // ── Répartition des collections par statut (sandbox = MAJUSCULES, prod = minuscules)
+    $byStatus = $this->collectionsQuery($env, $aggregatorId)
+                     ->selectRaw('UPPER(status) as s, COUNT(*) as n')
+                     ->groupBy('s')->pluck('n', 's');
+
+    $breakdown = [
+        'SUCCESS'  => (int) ($byStatus['SUCCESS']  ?? 0),
+        'PENDING'  => (int) ($byStatus['PENDING']  ?? 0),
+        'FAILED'   => (int) ($byStatus['FAILED']   ?? 0),
+        'REFUNDED' => (int) ($byStatus['REFUNDED'] ?? 0),
+    ];
+
+    $collectionsTotal = array_sum($breakdown);
+
+    $counts = [
+        'collections'       => $breakdown['SUCCESS'],
+        'collections_total' => $collectionsTotal,
+        'disbursements'     => $db->table('api_disbursements')
+                                  ->where('aggregator_id', $aggregatorId)->where('status', 'SUCCESS')->count(),
+        'bulks'             => $db->table('api_bulk_payments')
+                                  ->where('aggregator_id', $aggregatorId)->where('status', 'COMPLETED')->count(),
+    ];
+
+    $successRate = $collectionsTotal > 0
+        ? round($breakdown['SUCCESS'] / $collectionsTotal * 100)
+        : null;
+
+    // ── Dernières opérations
+    $recent = collect()
+        ->merge(
+            $this->collectionsQuery($env, $aggregatorId)
+                 ->orderByDesc('created_at')->limit($recentLimit)
+                 ->get(['transaction_id', 'order_reference', 'amount', 'status', 'created_at'])
+                 ->map(fn ($r) => [
+                     'type'       => 'COLLECTION',
+                     'id'         => $r->transaction_id,
+                     'label'      => $r->order_reference,
+                     'amount'     => (float) $r->amount,
+                     'status'     => strtoupper($r->status),
+                     'created_at' => \Carbon\Carbon::parse($r->created_at),
+                 ])
+        )
+        ->merge(
+            $db->table('api_disbursements')->where('aggregator_id', $aggregatorId)
+               ->orderByDesc('created_at')->limit($recentLimit)
+               ->get(['disbursement_id', 'reference', 'amount', 'status', 'created_at'])
+               ->map(fn ($r) => [
+                   'type'       => 'DISBURSEMENT',
+                   'id'         => $r->disbursement_id,
+                   'label'      => $r->reference,
+                   'amount'     => (float) $r->amount,
+                   'status'     => strtoupper($r->status),
+                   'created_at' => \Carbon\Carbon::parse($r->created_at),
+               ])
+        )
+        ->merge(
+            $db->table('api_bulk_payments')->where('aggregator_id', $aggregatorId)
+               ->orderByDesc('created_at')->limit($recentLimit)
+               ->get(['bulk_id', 'label', 'total_amount', 'status', 'created_at'])
+               ->map(fn ($r) => [
+                   'type'       => 'BULK',
+                   'id'         => $r->bulk_id,
+                   'label'      => $r->label,
+                   'amount'     => (float) $r->total_amount,
+                   'status'     => strtoupper($r->status),
+                   'created_at' => \Carbon\Carbon::parse($r->created_at),
+               ])
+        )
+        ->sortByDesc(fn ($r) => $r['created_at']->timestamp)
+        ->take($recentLimit)
+        ->values();
+
+    // ── 14 jours de données : les 7 derniers pour la courbe, les 7 d'avant pour la tendance
+    $from = now()->subDays(13)->startOfDay();
+    $days = collect(range(13, 0))->map(fn ($i) => now()->subDays($i)->format('Y-m-d'));
+
+    $collected = $this->collectionsQuery($env, $aggregatorId)
+                      ->where('status', $okTx)->where('created_at', '>=', $from)
+                      ->selectRaw('DATE(created_at) as d, SUM(amount) as t')
+                      ->groupBy('d')->pluck('t', 'd');
+
+    $disbursed = $db->table('api_disbursements')
+                    ->where('aggregator_id', $aggregatorId)->where('status', 'SUCCESS')
+                    ->where('created_at', '>=', $from)
+                    ->selectRaw('DATE(created_at) as d, SUM(amount) as t')
+                    ->groupBy('d')->pluck('t', 'd');
+
+    $bulked = $db->table('api_bulk_payment_recipients as r')
+                 ->join('api_bulk_payments as b', 'b.bulk_id', '=', 'r.bulk_id')
+                 ->where('b.aggregator_id', $aggregatorId)->where('r.status', 'SUCCESS')
+                 ->where('r.created_at', '>=', $from)
+                 ->selectRaw('DATE(r.created_at) as d, SUM(r.amount) as t')
+                 ->groupBy('d')->pluck('t', 'd');
+
+    $inSeries  = $days->map(fn ($d) => (float) ($collected[$d] ?? 0));
+    $outSeries = $days->map(fn ($d) => (float) ($disbursed[$d] ?? 0) + (float) ($bulked[$d] ?? 0));
+
+    $lastDays = $days->slice(7)->values();   // 7 derniers jours
+
+    $chart = [
+        'labels'        => $lastDays->map(fn ($d) => \Carbon\Carbon::parse($d)->format('d/m'))->all(),
+        'collections'   => $inSeries->slice(7)->values()->all(),
+        'disbursements' => $outSeries->slice(7)->values()->all(),
+    ];
+
+    $week = [
+        'collected' => $inSeries->slice(7)->sum(),
+        'disbursed' => $outSeries->slice(7)->sum(),
+    ];
+
+    $prev = [
+        'collected' => $inSeries->slice(0, 7)->sum(),
+        'disbursed' => $outSeries->slice(0, 7)->sum(),
+    ];
+
+    $trend = fn ($now, $before) => $before > 0 ? (int) round(($now - $before) / $before * 100) : null;
+
+    $trends = [
+        'collected' => $trend($week['collected'], $prev['collected']),
+        'disbursed' => $trend($week['disbursed'], $prev['disbursed']),
+    ];
+
+    return [
+        'counts'       => $counts,
+        'success_rate' => $successRate,
+        'trends'       => $trends,
+        'week'         => $week,
+        'chart'        => $chart,
+        'breakdown'    => $breakdown,
+        'recent'       => $recent,
+    ];
+}
+    private function collectionsQuery(string $env, string $aggregatorId)
+    {
+        $c = $this->cfg($env);
+        $q = $this->db($env)->table($c['tx_table'])->where('aggregator_id', $aggregatorId);
+
+        if ($c['tx_filter']) {
+            $q->where('api_type', 'COLLECTION');
+        }
+
+        return $q;
+    }
+
     // ───────────── Requêtes ─────────────
 
     private function collections(string $env, string $group, ?string $aggregatorId = null): Collection

@@ -2,81 +2,78 @@
 
 namespace App\Http\Controllers\Portal;
 
+use App\Domain\Auth\Services\PortalDataService;
 use App\Http\Controllers\Controller;
-use App\Domain\SubMerchants\Models\SubMerchant;
-use App\Domain\SubMerchants\Services\SubMerchantService;
-use App\Domain\Auth\Models\Application;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class SubMerchantController extends Controller
 {
-    public function __construct(protected SubMerchantService $service) {}
+    public function __construct(protected PortalDataService $data) {}
+
+    private function ctx(): array
+    {
+        return $this->data->context(auth('aggregator')->user());
+    }
+
+    public function store(Request $request, string $appId)
+    {
+        $validated = $request->validate([
+            'legal_name'    => 'required|string|max:255',
+            'business_type' => 'required|string|max:255',
+            'address'       => 'required|string|max:500',
+            'webhook_url'   => 'required|url|max:255',
+        ]);
+
+        try {
+            $id = $this->data->createSubMerchant($this->ctx(), $appId, $validated);
+        } catch (RuntimeException $e) {
+            return back()->withInput()->with('error', PortalDataService::errorMessage($e->getMessage()));
+        }
+
+        return redirect()->route('portal.sub-merchants.show', [$appId, $id])
+            ->with('success', 'Sous-marchand créé. Activez-le pour pouvoir recevoir des opérations.');
+    }
 
     public function show(string $appId, string $smId)
     {
-        // Vérifier que l'application appartient à l'agrégateur
-        $application = Application::where('id', $appId)
-                                  ->where('aggregator_id', auth('aggregator')->id())
-                                  ->firstOrFail();
+        $ctx = $this->ctx();
+        $sm  = $this->data->subMerchant($ctx, $appId, $smId);
 
-        // Vérifier que le sous-marchand appartient à cette application
-        $subMerchant = SubMerchant::where('id', $smId)
-                                  ->where('application_id', $appId)
-                                  ->firstOrFail();
+        abort_if(!$sm, 404);
 
-        return view('portal.sub-merchants.show',
-                    compact('application', 'subMerchant'));
+        return view('portal.sub-merchants.show', [
+            'env'        => $ctx['env'],
+            'appId'      => $appId,
+            'sm'         => $sm,
+            'totals'     => $this->data->subMerchantTotals($ctx, $smId),
+            'operations' => $this->data->subMerchantOperations($ctx, $smId),
+        ]);
     }
-
-  public function store(Request $request, string $appId)
-{
-    $application = Application::where('id', $appId)
-                              ->where('aggregator_id', auth('aggregator')->id())
-                              ->firstOrFail();
-
-    $request->validate([
-        'legal_name'    => 'required|string|max:255',
-        'business_type' => 'required|string|max:255',
-        'address'       => 'required|string|max:500',
-        'webhook_url'   => 'required|url',
-    ]);
-
-    $this->service->create($request->all(), $appId);
-
-    return redirect()
-        ->route('portal.applications.show', $appId)
-        ->with('success', 'Sous-marchand créé avec succès.');
-}
 
     public function activate(string $appId, string $smId)
     {
-        $subMerchant = $this->findSubMerchant($appId, $smId);
-        $this->service->activate($subMerchant);
-        return back()->with('success', 'Sous-marchand activé.');
+        return $this->change($appId, $smId, 'activate', 'Sous-marchand activé.');
     }
 
     public function suspend(string $appId, string $smId)
     {
-        $subMerchant = $this->findSubMerchant($appId, $smId);
-        $this->service->suspend($subMerchant);
-        return back()->with('success', 'Sous-marchand suspendu.');
+        return $this->change($appId, $smId, 'suspend', 'Sous-marchand suspendu.');
     }
 
     public function close(string $appId, string $smId)
     {
-        $subMerchant = $this->findSubMerchant($appId, $smId);
-        $this->service->close($subMerchant);
-        return back()->with('success', 'Sous-marchand clôturé.');
+        return $this->change($appId, $smId, 'close', 'Sous-marchand clôturé définitivement.');
     }
 
-    private function findSubMerchant(string $appId, string $smId): SubMerchant
+    private function change(string $appId, string $smId, string $action, string $message)
     {
-        Application::where('id', $appId)
-                   ->where('aggregator_id', auth('aggregator')->id())
-                   ->firstOrFail();
+        try {
+            $this->data->changeSubMerchantStatus($this->ctx(), $appId, $smId, $action);
+        } catch (RuntimeException $e) {
+            return back()->with('error', PortalDataService::errorMessage($e->getMessage()));
+        }
 
-        return SubMerchant::where('id', $smId)
-                          ->where('application_id', $appId)
-                          ->firstOrFail();
+        return back()->with('success', $message);
     }
 }

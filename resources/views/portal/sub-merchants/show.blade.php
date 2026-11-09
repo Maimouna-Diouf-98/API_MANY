@@ -1,185 +1,95 @@
 @extends('layouts.portal')
 
-@section('title', 'Sous-marchand — Many Portail')
-
-@section('page_title', $subMerchant->legal_name)
+@section('title', $sm->legal_name . ' — Many')
+@section('page_title', 'Sous-marchand')
 
 @section('content')
 
-<div class="max-w-3xl">
+@php
+    $money = fn ($v) => number_format((float) $v, 0, ',', ' ');
+    $typeLabels = ['collections' => 'Collection', 'disbursements' => 'Décaissement', 'bulks' => 'Paiement de masse'];
+@endphp
 
-    <a href="{{ route('portal.applications.show', $application->id) }}"
-       class="text-sm hover:underline mb-6 inline-block"
-       style="color:#b13a7e;">
-        ← Retour à {{ $application->name }}
-    </a>
+<a href="{{ route('portal.applications.show', $appId) }}" class="text-sm text-slate-500 hover:text-slate-800">← {{ $sm->application_name }}</a>
 
-    {{-- Header statut + actions --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div class="flex items-center justify-between mb-4">
-            <div>
-                <h2 class="text-lg font-bold text-gray-900">
-                    {{ $subMerchant->legal_name }}
-                </h2>
-                @if($subMerchant->trade_name)
-                    <p class="text-sm text-gray-400">{{ $subMerchant->trade_name }}</p>
-                @endif
-                <p class="text-xs font-mono text-gray-300 mt-1">
-                    ID : {{ $subMerchant->id }}
-                </p>
-            </div>
-            @php
-                $colors = [
-                    'PENDING'   => 'bg-yellow-100 text-yellow-700',
-                    'ACTIVE'    => 'bg-green-100 text-green-700',
-                    'SUSPENDED' => 'bg-orange-100 text-orange-700',
-                    'CLOSED'    => 'bg-gray-100 text-gray-500',
-                ];
-            @endphp
-            <span class="text-sm px-3 py-1.5 rounded-full font-medium
-                {{ $colors[$subMerchant->status] ?? 'bg-gray-100 text-gray-500' }}">
-                {{ $subMerchant->status }}
-            </span>
-        </div>
+<div class="flex flex-wrap items-center justify-between gap-4 mt-3 mb-6">
+    <div class="flex items-center gap-3">
+        <h2 class="text-2xl font-bold tracking-tight">{{ $sm->legal_name }}</h2>
+        @include('portal.partials.badge', ['status' => $sm->status])
+    </div>
 
-        @if($subMerchant->status !== 'CLOSED')
-            <div class="flex items-center space-x-3 pt-4 border-t border-gray-100">
-
-                @if(in_array($subMerchant->status, ['PENDING', 'SUSPENDED']))
-                    <form method="POST"
-                          action="{{ route('portal.sub-merchants.activate',
-                                         [$application->id, $subMerchant->id]) }}">
-                        @csrf
-                        <button type="submit"
-                                class="px-4 py-2 rounded-lg text-xs font-medium
-                                       bg-green-100 text-green-700 hover:bg-green-200">
-                            ✓ Activer
-                        </button>
-                    </form>
-                @endif
-
-                @if($subMerchant->status === 'ACTIVE')
-                    <form method="POST"
-                          action="{{ route('portal.sub-merchants.suspend',
-                                         [$application->id, $subMerchant->id]) }}">
-                        @csrf
-                        <button type="submit"
-                                class="px-4 py-2 rounded-lg text-xs font-medium
-                                       bg-orange-100 text-orange-700 hover:bg-orange-200">
-                            ⏸ Suspendre
-                        </button>
-                    </form>
-                @endif
-
-                <form method="POST"
-                      action="{{ route('portal.sub-merchants.close',
-                                     [$application->id, $subMerchant->id]) }}"
-                      onsubmit="return confirm('Clôturer ? Action irréversible.')">
-                    @csrf
-                    <button type="submit"
-                            class="px-4 py-2 rounded-lg text-xs font-medium
-                                   bg-red-100 text-red-600 hover:bg-red-200">
-                        ✕ Clôturer
-                    </button>
-                </form>
-            </div>
+    <div class="flex flex-wrap gap-2">
+        @if(in_array($sm->status, ['PENDING', 'SUSPENDED'], true))
+            <form method="POST" action="{{ route('portal.sub-merchants.activate', [$appId, $sm->id]) }}">
+                @csrf
+                <button class="rounded-xl px-4 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700">Activer</button>
+            </form>
+        @endif
+        @if($sm->status === 'ACTIVE')
+            <form method="POST" action="{{ route('portal.sub-merchants.suspend', [$appId, $sm->id]) }}"
+                  onsubmit="return confirm('Suspendre ce sous-marchand ? Il ne pourra plus recevoir d\'opérations.');">
+                @csrf
+                <button class="rounded-xl px-4 py-2.5 text-sm font-semibold text-orange-700 ring-1 ring-inset ring-orange-300 hover:bg-orange-50">Suspendre</button>
+            </form>
+        @endif
+        @if($sm->status !== 'CLOSED')
+            <form method="POST" action="{{ route('portal.sub-merchants.close', [$appId, $sm->id]) }}"
+                  onsubmit="return confirm('Clôturer définitivement ce sous-marchand ? Cette action est irréversible.');">
+                @csrf
+                <button class="rounded-xl px-4 py-2.5 text-sm font-semibold text-red-700 ring-1 ring-inset ring-red-300 hover:bg-red-50">Clôturer</button>
+            </form>
         @endif
     </div>
-
-  
-        {{-- Infos générales --}}
-
-<div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-    <h3 class="text-sm font-semibold text-gray-700 mb-4">Informations</h3>
-    <div class="grid grid-cols-2 gap-x-8 gap-y-4">
-        {{-- Colonne gauche --}}
-        <div>
-            <p class="text-xs text-gray-400">Application</p>
-            <p class="text-sm font-medium text-gray-800">
-                {{ $application->name }}
-            </p>
-        </div>
-        <div>
-            <p class="text-xs text-gray-400">Type d'activité</p>
-            <p class="text-sm text-gray-800">
-                {{ $subMerchant->business_type }}
-            </p>
-        </div>
-        <div>
-            <p class="text-xs text-gray-400">Référence interne</p>
-            <p class="text-sm font-mono text-gray-800">
-                {{ $subMerchant->external_reference }}
-            </p>
-        </div>
-
-        {{-- Colonne droite --}}
-        <div>
-            <p class="text-xs text-gray-400">Raison sociale</p>
-            <p class="text-sm font-medium text-gray-800">
-                {{ $subMerchant->legal_name }}
-            </p>
-        </div>
-        <div>
-            <p class="text-xs text-gray-400">Adresse</p>
-            <p class="text-sm text-gray-800">
-                {{ $subMerchant->address }}
-            </p>
-        </div>
-        <div>
-            <p class="text-xs text-gray-400">Créé le</p>
-            <p class="text-sm text-gray-800">
-                {{ $subMerchant->created_at->format('d/m/Y à H:i') }}
-            </p>
-        </div>
-    </div>
-
-    {{-- Règlement --}}
-    {{-- <div class="bg-white rounded-xl border border-gray-200 p-6">
-        <div class="space-y-3">
-            <div>
-                <p class="text-xs text-gray-400">Mode de paiement</p>
-                <span class="text-xs px-2 py-1 rounded-full font-medium"
-                      style="background-color:#f9eef5; color:#b13a7e;">
-                    MANY
-                </span>
-            </div>
-        </div>
-    </div> --}}
 </div>
 
+<div class="grid sm:grid-cols-2 gap-4 mb-6">
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <p class="text-sm text-slate-500">Total collecté</p>
+        <p class="mt-2 text-2xl font-bold tabular">{{ $money($totals['collected']) }} <span class="text-sm font-medium text-slate-400">XOF</span></p>
+    </div>
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <p class="text-sm text-slate-500">Total décaissé</p>
+        <p class="mt-2 text-2xl font-bold tabular">{{ $money($totals['disbursed']) }} <span class="text-sm font-medium text-slate-400">XOF</span></p>
+    </div>
+</div>
 
-    {{-- Webhook --}}
-    <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <h3 class="text-sm font-semibold text-gray-700 mb-3">Webhook</h3>
-        <div class="flex items-center space-x-3">
-            <code class="flex-1 bg-gray-50 border border-gray-200 rounded-lg
-                         px-3 py-2 text-xs font-mono text-gray-800">
-                {{ $subMerchant->webhook_url }}
-            </code>
-            <button onclick="navigator.clipboard.writeText('{{ $subMerchant->webhook_url }}')"
-                    class="text-xs px-3 py-2 border border-gray-200 rounded-lg
-                           text-gray-500 hover:text-gray-700">
-                Copier
-            </button>
+<div class="grid lg:grid-cols-3 gap-6">
+    <div class="rounded-2xl bg-white border border-slate-200 shadow-sm p-6">
+        <h3 class="font-semibold mb-4">Informations</h3>
+        <dl class="text-sm space-y-3">
+            <div><dt class="text-slate-500 text-xs">Identifiant</dt><dd class="font-mono text-xs break-all mt-0.5">{{ $sm->id }}</dd></div>
+            <div><dt class="text-slate-500 text-xs">Référence</dt><dd class="font-medium mt-0.5">{{ $sm->external_reference }}</dd></div>
+            <div><dt class="text-slate-500 text-xs">Activité</dt><dd class="font-medium mt-0.5">{{ $sm->business_type }}</dd></div>
+            <div><dt class="text-slate-500 text-xs">Adresse</dt><dd class="mt-0.5">{{ $sm->address }}</dd></div>
+            <div><dt class="text-slate-500 text-xs">Webhook</dt><dd class="break-all mt-0.5">{{ $sm->webhook_url }}</dd></div>
+            <div><dt class="text-slate-500 text-xs">Créé le</dt><dd class="mt-0.5">{{ \Carbon\Carbon::parse($sm->created_at)->format('d/m/Y') }}</dd></div>
+        </dl>
+        <button type="button" onclick="copyText('{{ $sm->id }}', this)"
+                class="mt-4 text-xs font-semibold text-[#b13a7e] hover:underline">Copier l'identifiant (sub_merchant_id)</button>
+    </div>
+
+    <div class="lg:col-span-2 rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="font-semibold">Dernières opérations</h3>
+            <a href="{{ route('portal.transactions.index', ['sub_merchant_id' => $sm->id]) }}" class="text-sm font-medium text-[#b13a7e] hover:underline">Tout voir</a>
         </div>
+
+        @forelse($operations as $op)
+            <a href="{{ route('portal.transactions.show', [$op['id'], 'type' => $op['type']]) }}"
+               class="flex items-center justify-between gap-4 px-6 py-3.5 border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium">{{ $typeLabels[$op['type']] }} <span class="font-mono text-xs text-slate-400 ml-1">{{ $op['id'] }}</span></p>
+                    <p class="text-xs text-slate-400 truncate">{{ $op['label'] ?: '—' }} · {{ $op['created_at']->format('d/m/Y H:i') }}</p>
+                </div>
+                <div class="flex items-center gap-4 shrink-0">
+                    <p class="text-sm font-semibold tabular">{{ $money($op['amount']) }} XOF</p>
+                    @include('portal.partials.badge', ['status' => $op['status']])
+                </div>
+            </a>
+        @empty
+            <p class="px-6 py-14 text-center text-sm text-slate-400">Aucune opération pour ce sous-marchand.</p>
+        @endforelse
     </div>
-
-    {{-- Exemple API --}}
-    <div class="bg-black rounded-xl p-6">
-        <p class="text-xs text-gray-400 mb-3 font-medium">
-            Exemple — Initier un paiement pour ce marchand
-        </p>
-        <pre class="text-xs text-green-400 font-mono leading-relaxed overflow-x-auto">POST https://sandbox-api.many.sn/v1/transactions
-
-{
-  "sub_merchant_id": "{{ $subMerchant->id }}",
-  "amount": 25000,
-  "currency": "XOF",
-  "customer_phone": "+221771234567",
-  "order_reference": "CMD-2026-001"
-}</pre>
-    </div>
-
 </div>
 
 @endsection

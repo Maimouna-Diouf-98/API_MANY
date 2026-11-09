@@ -2,168 +2,112 @@
 
 namespace App\Http\Controllers\Portal;
 
+use App\Domain\Auth\Services\PortalDataService;
+use App\Support\CheckoutLinks;
 use App\Http\Controllers\Controller;
-use App\Domain\Transactions\Models\Transaction;
-use App\Domain\Disbursements\Models\Disbursement;
-use App\Domain\BulkPayments\Models\BulkPayment;
 use Illuminate\Http\Request;
 
 class TransactionController extends Controller
 {
-    public function index(Request $request)
+    private const MAX_EXPORT_ROWS = 5000;
+
+    public function __construct(protected PortalDataService $data) {}
+
+    private function ctx(): array
     {
-        $aggregator = auth('aggregator')->user();
-        $type       = $request->get('type', 'all');
-        $status     = $request->get('status');
-
-        // Collections
-        $collections = Transaction::where('aggregator_id', $aggregator->id)
-                                   ->when($status, fn($q) => $q->where('status', $status))
-                                   ->get()
-                                   ->map(fn($t) => [
-                                       'id'           => $t->transaction_id,
-                                       'type'         => 'COLLECTION',
-                                       'label'        => null,
-                                       'status'       => $t->status,
-                                       'amount'       => $t->amount,
-                                       'many_fee'     => $t->many_fee,
-                                       'net'          => $t->net_to_aggregator,
-                                       'phone'        => $t->customer_phone,
-                                       'reference'    => $t->order_reference,
-                                       'recipients'   => null,
-                                       'environment'  => $t->environment,
-                                       'created_at'   => $t->created_at,
-                                   ]);
-
-        // Disbursements unitaires
-        $disbursements = Disbursement::where('aggregator_id', $aggregator->id)
-                                      ->when($status, fn($q) => $q->where('status', $status))
-                                      ->get()
-                                      ->map(fn($d) => [
-                                          'id'          => $d->disbursement_id,
-                                          'type'        => 'DISBURSEMENT',
-                                          'label'       => null,
-                                          'status'      => $d->status,
-                                          'amount'      => $d->amount,
-                                          'many_fee'    => $d->many_fee,
-                                          'net'         => $d->net_amount,
-                                          'phone'       => $d->recipient_phone,
-                                          'reference'   => $d->reference,
-                                          'recipients'  => null,
-                                          'environment' => $d->environment,
-                                          'created_at'  => $d->created_at,
-                                      ]);
-
-        // Bulk payments
-        $bulkPayments = BulkPayment::where('aggregator_id', $aggregator->id)
-                                    ->when($status, fn($q) => $q->where('status', $status))
-                                    ->get()
-                                    ->map(fn($b) => [
-                                        'id'          => $b->bulk_id,
-                                        'type'        => 'BULK_PAYMENT',
-                                        'label'       => $b->label,
-                                        'status'      => $b->status,
-                                        'amount'      => $b->total_amount,
-                                        'many_fee'    => $b->many_fee,
-                                        'net'         => $b->total_amount - $b->many_fee,
-                                        'phone'       => null,
-                                        'reference'   => null,
-                                        'recipients'  => $b->total_recipients,
-                                        'environment' => $b->environment,
-                                        'created_at'  => $b->created_at,
-                                    ]);
-
-        // Fusionner selon le filtre type
-        if ($type === 'collection') {
-            $all = $collections;
-        } elseif ($type === 'disbursement') {
-            $all = $disbursements;
-        } elseif ($type === 'bulk') {
-            $all = $bulkPayments;
-        } else {
-            $all = $collections
-                    ->concat($disbursements)
-                    ->concat($bulkPayments);
-        }
-
-        $all = $all->sortByDesc('created_at')->values();
-
-        // Pagination manuelle
-        $page    = $request->get('page', 1);
-        $perPage = 20;
-        $total   = $all->count();
-        $items   = $all->slice(($page - 1) * $perPage, $perPage)->values();
-
-        // Totaux
-        $totalCollections  = Transaction::where('aggregator_id', $aggregator->id)
-                                        ->where('status', 'SUCCESS')->count();
-        $totalAmount       = Transaction::where('aggregator_id', $aggregator->id)
-                                        ->where('status', 'SUCCESS')->sum('amount');
-
-        $totalDisbursements = Disbursement::where('aggregator_id', $aggregator->id)
-                                          ->where('status', 'SUCCESS')->count();
-        $totalDisbursed     = Disbursement::where('aggregator_id', $aggregator->id)
-                                          ->where('status', 'SUCCESS')->sum('amount');
-
-        $totalBulk        = BulkPayment::where('aggregator_id', $aggregator->id)
-                                        ->where('status', 'COMPLETED')->count();
-        $totalBulkAmount  = BulkPayment::where('aggregator_id', $aggregator->id)
-                                        ->where('status', 'COMPLETED')->sum('total_amount');
-
-        // Total décaissé = disbursements + bulk
-        $totalDecaisse = $totalDisbursed + $totalBulkAmount;
-
-        return view('portal.transactions.index', compact(
-            'items',
-            'total',
-            'page',
-            'perPage',
-            'type',
-            'totalCollections',
-            'totalAmount',
-            'totalDisbursements',
-            'totalDisbursed',
-            'totalBulk',
-            'totalBulkAmount',
-            'totalDecaisse',
-        ));
+        return $this->data->context(auth('aggregator')->user());
     }
 
-    public function show(string $id)
+    private function filters(Request $request): array
     {
-        $aggregator = auth('aggregator')->user();
+        return $request->validate([
+            'type'            => 'nullable|in:collections,disbursements,bulks',
+            'status'          => 'nullable|in:PENDING,PROCESSING,SUCCESS,COMPLETED,FAILED,REFUNDED',
+            'q'               => 'nullable|string|max:100',
+            'from'            => 'nullable|date',
+            'to'              => 'nullable|date',
+            'sub_merchant_id' => 'nullable|string|max:36',
+        ]);
+    }
 
-        // Collection
-        $transaction = Transaction::where('transaction_id', $id)
-                                  ->where('aggregator_id', $aggregator->id)
-                                  ->first();
-        if ($transaction) {
-            return view('portal.transactions.show', [
-                'item' => $transaction,
-                'type' => 'COLLECTION',
-            ]);
+    public function index(Request $request)
+    {
+        $ctx     = $this->ctx();
+        $filters = $this->filters($request);
+        $type    = $filters['type'] ?? 'collections';
+
+        $items = $this->data->transactions($ctx, $type, $filters);
+
+        return view('portal.transactions.index', [
+            'env'          => $ctx['env'],
+            'type'         => $type,
+            'filters'      => $filters,
+            'items'        => $items,
+            'names'        => $this->data->subMerchantNames($ctx, $items->pluck('sub_merchant_id')),
+            'subMerchants' => $this->data->allSubMerchants($ctx),
+        ]);
+    }
+
+    public function show(Request $request, string $transactionId)
+    {
+        $ctx   = $this->ctx();
+        $found = $this->data->findTransaction($ctx, $transactionId, $request->query('type'));
+
+        abort_if(!$found, 404);
+
+        $row = $found['row'];
+
+        // Collection en attente et encore dans son délai : lien vers la page de paiement (QR à scanner)
+        $checkoutUrl = null;
+        if ($found['type'] === 'collections' && strtoupper($row->status) === 'PENDING') {
+            $createdAt = \Carbon\Carbon::parse($row->created_at);
+            if ($createdAt->copy()->addMinutes(CheckoutLinks::PAYMENT_WINDOW_MINUTES)->isFuture()) {
+                $checkoutUrl = CheckoutLinks::url($ctx['env'], $row->transaction_id, $createdAt);
+            }
         }
-
-        // Disbursement
-        $disbursement = Disbursement::where('disbursement_id', $id)
-                                    ->where('aggregator_id', $aggregator->id)
-                                    ->first();
-        if ($disbursement) {
-            return view('portal.transactions.show', [
-                'item' => $disbursement,
-                'type' => 'DISBURSEMENT',
-            ]);
-        }
-
-        // Bulk payment
-        $bulkPayment = BulkPayment::where('bulk_id', $id)
-                                   ->where('aggregator_id', $aggregator->id)
-                                   ->with('recipients')
-                                   ->firstOrFail();
 
         return view('portal.transactions.show', [
-            'item' => $bulkPayment,
-            'type' => 'BULK_PAYMENT',
+            'env'        => $ctx['env'],
+            'checkoutUrl' => $checkoutUrl,
+            'type'       => $found['type'],
+            'row'        => $row,
+            'merchant'   => $this->data->subMerchantNames($ctx, [$row->sub_merchant_id])[$row->sub_merchant_id] ?? '—',
+            'recipients' => $found['type'] === 'bulks'
+                            ? $this->data->bulkRecipients($ctx, $row->bulk_id)
+                            : collect(),
         ]);
+    }
+
+    /** Export CSV des résultats filtrés (5 000 lignes maximum, séparateur « ; » pour Excel). */
+    public function export(Request $request)
+    {
+        $ctx     = $this->ctx();
+        $filters = $this->filters($request);
+        $type    = $filters['type'] ?? 'collections';
+
+        $rows    = $this->data->transactionsQuery($ctx, $type, $filters)->limit(self::MAX_EXPORT_ROWS)->get();
+        $columns = $this->data->columns($ctx, $type);
+
+        $filename = "many-{$ctx['env']}-{$type}-" . now()->format('Ymd-His') . '.csv';
+
+        return response()->streamDownload(function () use ($rows, $columns) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");               // BOM : accents corrects dans Excel
+            fputcsv($out, $columns, ';');
+
+            foreach ($rows as $row) {
+                fputcsv($out, array_map(fn ($c) => $this->csvSafe($row->{$c} ?? ''), $columns), ';');
+            }
+
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    /** Neutralise les cellules interprétées comme des formules par Excel. */
+    private function csvSafe(mixed $value): string
+    {
+        $value = (string) $value;
+
+        return $value !== '' && in_array($value[0], ['=', '+', '-', '@'], true) ? "'" . $value : $value;
     }
 }
