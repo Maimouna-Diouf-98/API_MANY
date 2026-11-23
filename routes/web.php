@@ -14,10 +14,10 @@ Route::prefix('portal')->name('portal.')->group(function () {
 
     // Pages publiques (non connecté)
     Route::get('/login', [PortalAuthController::class, 'showLogin'])->name('login');
-    Route::post('/login', [PortalAuthController::class, 'login']);
+    Route::post('/login', [PortalAuthController::class, 'login'])->middleware('throttle:10,1');
 
     Route::get('/register', [PortalAuthController::class, 'showRegister'])->name('register');
-    Route::post('/register', [PortalAuthController::class, 'register']);
+    Route::post('/register', [PortalAuthController::class, 'register'])->middleware('throttle:5,1');
 
     Route::post('/logout', [PortalAuthController::class, 'logout'])->name('logout');
 
@@ -72,9 +72,10 @@ Route::prefix('portal')->name('portal.')->group(function () {
     Route::get('/email-verified', [PortalAuthController::class, 'emailVerified'])
          ->name('email.verified');
 
+    // Sans session : appelée depuis la page de connexion pour un compte non vérifié
     Route::post('/resend-verification', [PortalAuthController::class, 'resendVerification'])
          ->name('resend.verification')
-         ->middleware('auth:aggregator');
+         ->middleware('throttle:3,1');
 });
 
 // ─── Page de paiement (checkout) : publique, protégée par un lien signé ───
@@ -93,6 +94,10 @@ Route::prefix('checkout/{env}/{transactionId}')
 Route::get('/', fn () => redirect()->route('portal.login'));
 
 // ─── Test POS / Paiement Marchand pour l'Application Mobile ───
+// Outil de test : crée de vraies demandes de paiement en base money, sans authentification.
+// Jamais exposé quand APP_ENV=production.
+if (! app()->environment('production')) {
+
 Route::post('/test-pos/create', function (\Illuminate\Http\Request $request) {
     \Illuminate\Support\Facades\DB::setDefaultConnection('mysql_money');
     $aggregator = \App\Domain\Auth\Models\Aggregator::on('mysql_money')->first();
@@ -134,6 +139,8 @@ Route::get('/test-pos/status/{id}', function (string $id) {
         'updated_at'     => $tx?->updated_at,
     ]);
 });
+
+} // fin test-pos (hors production)
 
 // ─── Espace admin Many (/backoffice) ──────────────────
 require __DIR__ . '/admin.php';

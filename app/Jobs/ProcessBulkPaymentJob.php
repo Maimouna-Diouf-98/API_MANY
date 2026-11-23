@@ -55,6 +55,18 @@ class ProcessBulkPaymentJob implements ShouldQueue
                 $notification = DB::connection($dbConnection)->transaction(
                     function () use ($recipient, $totalDebit, $dbConnection, $senderId) {
 
+                        // Verrou + relecture : si un autre worker a déjà traité ce
+                        // bénéficiaire, on ne le paie pas une seconde fois.
+                        $stillPending = DB::connection($dbConnection)
+                            ->table('api_bulk_payment_recipients')
+                            ->where('id', $recipient->id)
+                            ->lockForUpdate()
+                            ->value('status') === 'PENDING';
+
+                        if (!$stillPending) {
+                            return null;
+                        }
+
                         $aggregatorWallet = DB::connection($dbConnection)
                             ->table('wallets')
                             ->where('user_id', $senderId)

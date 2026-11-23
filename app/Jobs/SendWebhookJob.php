@@ -25,10 +25,15 @@ class SendWebhookJob implements ShouldQueue
     public int $tries   = 5;
     public int $backoff = 60;
 
+    /** Identique à chaque nouvel essai : permet à l'agrégateur de dédoublonner. */
+    public string $eventId;
+
     public function __construct(
         public Transaction|RealTransaction|Disbursement|BulkPayment $transaction,
         public string                                                $eventType,
-    ) {}
+    ) {
+        $this->eventId = (string) Str::uuid();
+    }
 
     public function handle(): void
     {
@@ -57,7 +62,7 @@ class SendWebhookJob implements ShouldQueue
         ]);
 
         $payload = [
-            'event_id'   => (string) Str::uuid(),
+            'event_id'   => $this->eventId,
             'event_type' => $this->eventType,
             'created_at' => now()->toIso8601String(),
             'data'       => match (true) {
@@ -89,11 +94,20 @@ class SendWebhookJob implements ShouldQueue
             'sub_merchant_webhook_url' => $subMerchant->webhook_url ?? 'N/A',
         ]);
 
+        // Signature documentée : HMAC-SHA256 du corps avec le client_secret de l'application
+        // (les agrégateurs n'ont pas de secret propre). Même clé pour toutes les URLs.
+        $secret = (string) ($application?->client_secret ?? '');
+        if (str_starts_with($secret, 's:')) {
+            // Anciens secrets stockés sérialisés : même normalisation que /v1/auth/token
+            $unserialized = @unserialize($secret, ['allowed_classes' => false]);
+            $secret = is_string($unserialized) ? $unserialized : $secret;
+        }
+
         if ($aggregator) {
             $this->sendWebhook(
                 $aggregator->webhook_url,
                 $payload,
-                $aggregator->client_secret ?? '',
+                $secret,
                 $isSandbox
             );
         }
@@ -105,7 +119,7 @@ class SendWebhookJob implements ShouldQueue
             $this->sendWebhook(
                 $this->transaction->webhook_url,
                 $payload,
-                '',
+                $secret,
                 $isSandbox
             );
         }
@@ -113,7 +127,7 @@ class SendWebhookJob implements ShouldQueue
         $this->sendWebhook(
             $subMerchant->webhook_url,
             $payload,
-            '',
+            $secret,
             $isSandbox
         );
 
@@ -183,16 +197,16 @@ class SendWebhookJob implements ShouldQueue
         $timestamp = now()->timestamp;
         $signature = hash_hmac('sha256', $body, $secret);
 
+        // On envoie exactement le corps signé (pas de ré-encodage par le client HTTP)
         $request = Http::withHeaders([
-            'Content-Type'             => 'application/json',
             'X-Many-Webhook-Signature' => $signature,
             'X-Many-Webhook-Timestamp' => $timestamp,
             'X-Many-Event-Id'          => $payload['event_id'],
-        ])->timeout(10);
+        ])->withBody($body, 'application/json')->timeout(10);
 
         if ($isSandbox) {
             try {
-                $response = $request->post($url, $payload);
+                $response = $request->post($url);
                 Log::info("Webhook sandbox envoyé à {$url} — statut: " . $response->status());
             } catch (\Exception $e) {
                 Log::info("Webhook sandbox ignoré (URL probablement fictive): " . $e->getMessage());
@@ -201,7 +215,7 @@ class SendWebhookJob implements ShouldQueue
         }
 
         try {
-            $response = $request->post($url, $payload);
+            $response = $request->post($url);
             if ($response->successful()) {
                 Log::info("Webhook production envoyé à {$url} — statut: " . $response->status());
             } else {

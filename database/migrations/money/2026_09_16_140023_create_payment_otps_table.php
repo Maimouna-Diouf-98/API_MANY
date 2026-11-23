@@ -6,8 +6,17 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    public function getConnection(): string
+    {
+        return 'mysql_money';
+    }
+
     public function up(): void
     {
+        if (Schema::connection('mysql_money')->hasTable('payment_otps')) {
+            return;
+        }
+
         Schema::connection('mysql_money')->create('payment_otps', function (Blueprint $table) {
             $table->id();
             $table->string('transaction_id');

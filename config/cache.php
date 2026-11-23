@@ -41,9 +41,9 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_CACHE_CONNECTION'),
+            'connection' => env('DB_CACHE_CONNECTION', 'mysql_sandbox'), // fixe : la connexion par défaut bascule sur mysql_money pendant les requêtes de production
             'table' => env('DB_CACHE_TABLE', 'cache'),
-            'lock_connection' => env('DB_CACHE_LOCK_CONNECTION'),
+            'lock_connection' => env('DB_CACHE_LOCK_CONNECTION', 'mysql_sandbox'),
             'lock_table' => env('DB_CACHE_LOCK_TABLE'),
         ],
 

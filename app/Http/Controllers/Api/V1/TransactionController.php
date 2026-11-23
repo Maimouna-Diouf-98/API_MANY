@@ -105,6 +105,7 @@ class TransactionController extends Controller
                 'CUSTOMER_WALLET_NOT_FOUND' => ['code' => 'CUSTOMER_WALLET_NOT_FOUND', 'message' => 'Portefeuille client introuvable.',         'status' => 422],
                 'INSUFFICIENT_FUNDS'        => ['code' => 'INSUFFICIENT_FUNDS',        'message' => 'Solde insuffisant.',                      'status' => 422],
                 'CUSTOMER_MPIN_NOT_SET'     => ['code' => 'CUSTOMER_MPIN_NOT_SET',     'message' => 'Le client n\'a pas configuré son PIN.',   'status' => 422],
+                'IDEMPOTENCY_KEY_CONFLICT'  => ['code' => 'IDEMPOTENCY_KEY_CONFLICT',  'message' => 'Cette idempotency_key est déjà utilisée.', 'status' => 409],
             ];
 
             $error = $errorMap[$e->getMessage()] ?? [
@@ -181,7 +182,20 @@ class TransactionController extends Controller
                 'refunded_at'    => $transaction->updated_at,
             ]);
         } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage(), 'message' => 'Remboursement impossible.'], 422);
+            $messages = [
+                'TRANSACTION_NOT_REFUNDABLE'     => 'Seule une transaction réussie et non remboursée peut être remboursée.',
+                'REFUND_AMOUNT_EXCEEDS_ORIGINAL' => 'Le montant dépasse celui de la transaction.',
+                'AGGREGATOR_INSUFFICIENT_FUNDS'  => 'Solde insuffisant pour effectuer le remboursement.',
+                'CUSTOMER_WALLET_NOT_FOUND'      => 'Portefeuille du client introuvable.',
+            ];
+
+            if (!isset($messages[$e->getMessage()])) {
+                // Ne jamais renvoyer un message technique (SQL...) à l'agrégateur
+                Log::error('REFUND ERROR: ' . $e->getMessage() . ' | ' . $e->getFile() . ':' . $e->getLine());
+                return response()->json(['error' => 'INTERNAL_ERROR', 'message' => 'Erreur interne.'], 500);
+            }
+
+            return response()->json(['error' => $e->getMessage(), 'message' => $messages[$e->getMessage()]], 422);
         }
     }
 

@@ -34,6 +34,15 @@ class AuthController extends Controller
         ])) {
             $aggregator = auth('aggregator')->user();
 
+            // Un compte suspendu ou clôturé ne doit plus accéder au portail
+            if (in_array($aggregator->status, ['SUSPENDED', 'CLOSED'], true)) {
+                auth('aggregator')->logout();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ce compte est suspendu ou clôturé. Contactez Many.',
+                ], 403);
+            }
+
             if (is_null($aggregator->email_verified_at)) {
                 auth('aggregator')->logout();
                 return response()->json([
@@ -67,8 +76,10 @@ class AuthController extends Controller
         $request->validate([
             'legal_name'  => 'required|string|max:255',
             'trade_name'  => 'nullable|string|max:255',
-            'email'       => 'required|email|unique:mysql_money.aggregators,email',
-            'phone'       => 'nullable|string|max:20',
+            // Le compte est créé en sandbox : l'unicité doit être vérifiée là aussi
+            'email'       => 'required|email|unique:mysql_sandbox.aggregators,email|unique:mysql_money.aggregators,email',
+            // Obligatoire : l'activation en production crée le compte Many avec ce numéro
+            'phone'       => 'required|string|max:20',
             'webhook_url' => 'required|url',
             'password'    => 'required|confirmed|min:8',
             'terms'       => 'accepted',
@@ -76,6 +87,9 @@ class AuthController extends Controller
 
         // Référence unique
         $referenceNo = 'AGG' . strtoupper(Str::random(6));
+
+        // User + wallet + agrégateur : tout ou rien (pas de user/wallet orphelin en cas d'erreur)
+        $aggregator = DB::connection('mysql_sandbox')->transaction(function () use ($request, $referenceNo) {
 
         // Créer le user Many avec rôle aggregator
         $userId = DB::connection('mysql_sandbox')
@@ -120,9 +134,17 @@ class AuthController extends Controller
             'commission_rate'    => 0.00,
         ]);
 
-        // Envoyer email de vérification
-        Mail::to($aggregator->email)
-            ->send(new AggregatorEmailVerification($aggregator));
+        return $aggregator;
+        });
+
+        // Envoyer email de vérification : un échec SMTP ne doit pas faire échouer
+        // l'inscription (le compte existe ; l'email peut être renvoyé depuis la page de connexion)
+        try {
+            Mail::to($aggregator->email)
+                ->send(new AggregatorEmailVerification($aggregator));
+        } catch (\Throwable $e) {
+            Log::error('Email de vérification non envoyé (inscription) : ' . $e->getMessage());
+        }
 
         return response()->json([
             'success'      => true,
@@ -154,23 +176,33 @@ class AuthController extends Controller
         return view('portal.auth.email-verified');
     }
 
+    /**
+     * Appelée depuis la page de connexion, donc sans session (un compte non vérifié
+     * est déconnecté au login). Réponse identique que le compte existe ou non,
+     * pour ne pas révéler quels emails sont inscrits.
+     */
     public function resendVerification(Request $request)
     {
-        $aggregator = auth('aggregator')->user();
+        $request->validate(['email' => 'required|email']);
 
-        if ($aggregator->email_verified_at) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Email déjà vérifié.',
-            ]);
+        $aggregator = Aggregator::on('mysql_sandbox')->where('email', $request->email)->first();
+
+        if ($aggregator && is_null($aggregator->email_verified_at)) {
+            try {
+                Mail::to($aggregator->email)
+                    ->send(new AggregatorEmailVerification($aggregator));
+            } catch (\Throwable $e) {
+                Log::error('Email de vérification non renvoyé : ' . $e->getMessage());
+                return response()->json([
+                    'success' => false,
+                    'message' => "L'email n'a pas pu être envoyé. Réessayez dans quelques minutes.",
+                ], 503);
+            }
         }
-
-        Mail::to($aggregator->email)
-            ->send(new AggregatorEmailVerification($aggregator));
 
         return response()->json([
             'success' => true,
-            'message' => 'Email de vérification renvoyé.',
+            'message' => "Si un compte non vérifié existe pour cet email, un nouveau lien vient d'être envoyé.",
         ]);
     }
 

@@ -37,10 +37,14 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION'),
+            // Fixe : sinon la file suit la connexion par défaut, qui bascule sur mysql_money
+            // pendant les requêtes de production (jobs dispersés entre les deux bases).
+            'connection' => env('DB_QUEUE_CONNECTION', 'mysql_sandbox'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // Doit dépasser le plus long $timeout des jobs (ProcessBulkPaymentJob : 300 s),
+            // sinon un job encore en cours est relancé en parallèle.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 360),
             'after_commit' => false,
         ],
         'mysql_sandbox' => [
@@ -48,7 +52,7 @@ return [
              'connection'  => 'mysql_sandbox',
              'table'       => 'jobs',
              'queue'       => 'default',
-             'retry_after' => 90,
+             'retry_after' => 360, // > timeout de ProcessBulkPaymentJob (300 s)
              'after_commit' => false,
         ],
 
@@ -57,7 +61,7 @@ return [
            'connection'  => 'mysql_money',
            'table'       => 'jobs',
            'queue'       => 'default',
-           'retry_after' => 90,
+           'retry_after' => 360, // > timeout de ProcessBulkPaymentJob (300 s)
            'after_commit' => false,
        ],
 

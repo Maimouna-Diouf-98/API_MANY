@@ -29,15 +29,24 @@ public function productionAggregator(object $aggregator): ?object
         return $this->memo[$aggregator->email];
     }
 
-    $row = Cache::remember('portal.prodagg.' . sha1($aggregator->email), 300, function () use ($aggregator) {
+    // Seul un résultat positif est mis en cache : sinon un agrégateur tout juste
+    // activé en production resterait bloqué en sandbox jusqu'à 5 minutes.
+    $key = 'portal.prodagg.' . sha1($aggregator->email);
+    $row = Cache::get($key);
+
+    if (!$row) {
         try {
-            return DB::connection('mysql_money')->table('aggregators')
-                     ->where('email', $aggregator->email)->first() ?: false;
+            $row = DB::connection('mysql_money')->table('aggregators')
+                     ->where('email', $aggregator->email)->first();
         } catch (Throwable $e) {
             Log::error('Portail : lecture agrégateur production impossible : ' . $e->getMessage());
-            return false;
+            $row = null;
         }
-    });
+
+        if ($row) {
+            Cache::put($key, $row, 300);
+        }
+    }
 
     return $this->memo[$aggregator->email] = $row ?: null;
 }

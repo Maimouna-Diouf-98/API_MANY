@@ -39,4 +39,15 @@ class Disbursement extends Model
         'completed_at' => 'datetime',
         'confirmed_at' => 'datetime',
     ];
+
+    /**
+     * Requête sur le bon modèle selon l'environnement :
+     * PRODUCTION → RealDisbursement (mysql_money), sinon Disbursement (sandbox).
+     */
+    public static function forEnvironment(string $environment): \Illuminate\Database\Eloquent\Builder
+    {
+        return $environment === 'PRODUCTION'
+            ? RealDisbursement::query()
+            : static::on('mysql_sandbox');
+    }
 }

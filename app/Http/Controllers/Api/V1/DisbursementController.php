@@ -18,7 +18,8 @@ class DisbursementController extends Controller
     public function index(Request $request)
     {
         $aggregator    = $request->authenticated_aggregator;
-        $disbursements = Disbursement::where('aggregator_id', $aggregator->id)
+        $disbursements = Disbursement::forEnvironment($request->environment ?? 'SANDBOX')
+                                     ->where('aggregator_id', $aggregator->id)
                                      ->when($request->status, fn($q) =>
                                          $q->where('status', $request->status))
                                      ->latest()
@@ -130,6 +131,7 @@ class DisbursementController extends Controller
                 'INSUFFICIENT_FUNDS'         => ['code' => 'INSUFFICIENT_FUNDS',         'message' => 'Solde insuffisant.',                       'status' => 422],
                 'RECIPIENT_NOT_FOUND'        => ['code' => 'RECIPIENT_NOT_FOUND',        'message' => 'Ce numéro n\'a pas de compte Many.',       'status' => 404],
                 'RECIPIENT_WALLET_NOT_FOUND' => ['code' => 'RECIPIENT_WALLET_NOT_FOUND', 'message' => 'Portefeuille destinataire introuvable.',    'status' => 422],
+                'IDEMPOTENCY_KEY_CONFLICT'   => ['code' => 'IDEMPOTENCY_KEY_CONFLICT',   'message' => 'Cette idempotency_key est déjà utilisée.',   'status' => 409],
             ];
 
             $error = $errorMap[$e->getMessage()] ?? [
@@ -153,7 +155,16 @@ class DisbursementController extends Controller
 
         $aggregator = $request->authenticated_aggregator;
 
-        $disbursement = Disbursement::where('disbursement_id', $disbursementId)
+        // La confirmation par PIN n'existe qu'en production (en sandbox le traitement est automatique)
+        if (($request->environment ?? 'SANDBOX') !== 'PRODUCTION') {
+            return response()->json([
+                'error'   => 'CONFIRMATION_NOT_REQUIRED',
+                'message' => "La confirmation n'est requise qu'en production.",
+            ], 422);
+        }
+
+        $disbursement = Disbursement::forEnvironment('PRODUCTION')
+                                    ->where('disbursement_id', $disbursementId)
                                     ->where('aggregator_id', $aggregator->id)
                                     ->first();
 
@@ -202,7 +213,8 @@ class DisbursementController extends Controller
     public function show(Request $request, string $disbursementId)
     {
         $aggregator   = $request->authenticated_aggregator;
-        $disbursement = Disbursement::where('disbursement_id', $disbursementId)
+        $disbursement = Disbursement::forEnvironment($request->environment ?? 'SANDBOX')
+                                    ->where('disbursement_id', $disbursementId)
                                     ->where('aggregator_id', $aggregator->id)
                                     ->firstOrFail();
 

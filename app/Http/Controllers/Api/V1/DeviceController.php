@@ -18,9 +18,12 @@ class DeviceController extends Controller
         $aggregator = $request->authenticated_aggregator;
         $environment = $request->environment ?? 'SANDBOX';
 
-        // Mettre à jour le fcm_token du user dans mysql_money
+        // user_id désigne un utilisateur de la base de l'environnement courant :
+        // écrire en sandbox dans mysql_money modifierait un autre utilisateur.
+        $dbConnection = $environment === 'PRODUCTION' ? 'mysql_money' : 'mysql_sandbox';
+
         if ($aggregator->user_id) {
-            DB::connection('mysql_money')
+            DB::connection($dbConnection)
               ->table('users')
               ->where('id', $aggregator->user_id)
               ->update([

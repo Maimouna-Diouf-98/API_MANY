@@ -34,12 +34,17 @@ class AuthController extends Controller
     // Comparer le secret (gérer les deux cas : sérialisé et non sérialisé)
     $storedSecret = $application->client_secret;
 
-    // Si le secret stocké est sérialisé, le désérialiser
-    if (str_starts_with($storedSecret, 's:')) {
-        $storedSecret = unserialize($storedSecret);
+    // Si le secret stocké est sérialisé (anciens enregistrements), le désérialiser
+    // sans jamais autoriser la création d'objets.
+    if (is_string($storedSecret) && str_starts_with($storedSecret, 's:')) {
+        $unserialized = @unserialize($storedSecret, ['allowed_classes' => false]);
+        if (is_string($unserialized)) {
+            $storedSecret = $unserialized;
+        }
     }
 
-    if ($request->client_secret !== $storedSecret) {
+    // Comparaison en temps constant (pas de fuite par mesure du temps de réponse)
+    if (!is_string($storedSecret) || !hash_equals($storedSecret, (string) $request->client_secret)) {
         return response()->json([
             'error'   => 'AUTH_INVALID_CLIENT',
             'message' => 'client_secret invalide.',

@@ -132,7 +132,7 @@
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Téléphone</label>
-                    <input type="text" name="phone" value="{{ old('phone') }}"
+                    <input type="text" name="phone" value="{{ old('phone') }}" required
                            placeholder="+221 77 000 00 00"
                            class="input-focus w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
                 </div>

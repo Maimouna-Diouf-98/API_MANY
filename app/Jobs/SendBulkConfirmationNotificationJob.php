@@ -44,19 +44,22 @@ class SendBulkConfirmationNotificationJob implements ShouldQueue
             return;
         }
 
-        $sent = app(FirebaseNotificationService::class)->sendBulkConfirmation(
-            $user->fcm_token,
-            $this->bulkId,
-            $this->label,
-            $this->totalRecipients,
-            $this->totalAmount,
-            $this->fee
-        );
+        // Un échec FCM (token expiré, désinstallation...) ne se corrige pas en réessayant :
+        // on journalise sans faire échouer le job, comme SendPaymentNotificationJob.
+        // L'agrégateur peut toujours confirmer via POST /v1/bulk-payments/{id}/confirm.
+        try {
+            $sent = app(FirebaseNotificationService::class)->sendBulkConfirmation(
+                $user->fcm_token,
+                $this->bulkId,
+                $this->label,
+                $this->totalRecipients,
+                $this->totalAmount,
+                $this->fee
+            );
 
-        Log::info('FCM bulk confirmation result: ' . ($sent ? 'SUCCESS' : 'FAILED'));
-
-        if (!$sent) {
-            throw new \RuntimeException('Échec envoi FCM BULK_PAYMENT_CONFIRMATION');
+            Log::info('FCM bulk confirmation result: ' . ($sent ? 'SUCCESS' : 'FAILED'));
+        } catch (\Throwable $e) {
+            Log::warning('FCM bulk confirmation error: ' . $e->getMessage());
         }
     }
 }

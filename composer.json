@@ -36,11 +36,14 @@
         }
     },
     "scripts": {
+        "migrate:money": "@php artisan migrate --database=mysql_money --path=database/migrations/money --force",
+        "migrate:sandbox": "@php artisan migrate --database=mysql_sandbox --path=database/migrations/sandbox --force",
         "setup": [
             "composer install",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
             "@php artisan key:generate",
-            "@php artisan migrate --force",
+            "@migrate:money",
+            "@migrate:sandbox",
             "npm install",
             "npm run build"
         ],

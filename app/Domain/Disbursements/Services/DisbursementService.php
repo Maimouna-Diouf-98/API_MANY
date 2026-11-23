@@ -19,9 +19,14 @@ class DisbursementService
         string     $applicationId
     ): Disbursement {
 
-        // Vérifier idempotence
+        // Vérifier idempotence (la clé est unique pour toute la table)
         if (!empty($data['idempotency_key'])) {
-            $existing = Disbursement::where('idempotency_key', $data['idempotency_key'])->first();
+            $existing = Disbursement::forEnvironment($environment)
+                                    ->where('idempotency_key', $data['idempotency_key'])
+                                    ->first();
+            if ($existing && $existing->aggregator_id !== $aggregator->id) {
+                throw new \Exception('IDEMPOTENCY_KEY_CONFLICT');
+            }
             if ($existing) return $existing;
         }
 
@@ -67,7 +72,7 @@ class DisbursementService
         }
 
         // Créer le disbursement
-        $disbursement = Disbursement::create([
+        $disbursement = Disbursement::forEnvironment($environment)->create([
             'disbursement_id'  => (string) rand(1000000000, 9999999999),
             'sub_merchant_id'  => $data['sub_merchant_id'],
             'aggregator_id'    => $aggregator->id,
@@ -136,7 +141,8 @@ public function confirmDisbursement(
     }
 
     // Verrou atomique : un seul appel peut remplir confirmed_at
-    $claimed = Disbursement::where('id', $disbursement->id)
+    $claimed = Disbursement::forEnvironment('PRODUCTION')
+                           ->where('id', $disbursement->id)
                            ->where('status', 'PENDING')
                            ->whereNull('confirmed_at')
                            ->update(['confirmed_at' => now()]);

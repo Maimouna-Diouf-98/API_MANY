@@ -12,16 +12,35 @@ class FirebaseNotificationService
 
     public function __construct()
     {
-        $this->projectId   = config('firebase.project_id');
-        $this->accessToken = $this->getAccessToken();
+        $this->projectId = (string) config('firebase.project_id');
+
+        if ($this->projectId === '') {
+            throw new \RuntimeException('FCM: FIREBASE_PROJECT_ID manquant dans .env');
+        }
+
+        // Le token OAuth Google est valable 1 h : on le réutilise 55 min au lieu
+        // d'en redemander un à chaque notification.
+        $this->accessToken = \Illuminate\Support\Facades\Cache::remember(
+            'fcm.access_token.' . $this->projectId,
+            55 * 60,
+            fn () => $this->getAccessToken()
+        );
     }
 
  private function getAccessToken(): string
 {
-    $credentials = json_decode(
-        file_get_contents(storage_path('app/firebase-credentials.json')),
-        true
-    );
+    // Chemin configurable (FIREBASE_CREDENTIALS), relatif à la racine du projet ou absolu
+    $path = (string) config('firebase.credentials');
+    // Absolu = commence par / ou \ (Linux) ou par une lettre de lecteur (Windows)
+    if ($path !== '' && !preg_match('#^([A-Za-z]:)?[/\\\\]#', $path)) {
+        $path = base_path($path);
+    }
+
+    if (!is_file($path)) {
+        throw new \RuntimeException("FCM: fichier d'identifiants introuvable ({$path})");
+    }
+
+    $credentials = json_decode(file_get_contents($path), true);
 
     $now = time();
     $payload = [
@@ -134,7 +153,8 @@ Log::info('FCM PAYLOAD', ['message' => $message]);
     string $transactionId,
     string $amount,              // montant brut, ex: "5000"
     string $merchantName,
-    string $currency = 'XOF'
+    string $currency = 'XOF',
+    ?string $orderReference = null
 ): bool {
     $display = number_format((float) $amount, 0, ',', ' ');
 
@@ -148,6 +168,7 @@ Log::info('FCM PAYLOAD', ['message' => $message]);
         'amount'         => $amount,
         'currency'       => $currency,
         'merchant_name'  => $merchantName,
+        'order_reference'=> (string) $orderReference,
     ]);
 }
 

@@ -29,6 +29,10 @@ class TransactionService
         if (!empty($data['idempotency_key'])) {
             $model    = $environment === 'SANDBOX' ? Transaction::class : RealTransaction::class;
             $existing = $model::where('idempotency_key', $data['idempotency_key'])->first();
+            if ($existing && $existing->aggregator_id !== $aggregator->id) {
+                // Clé unique globalement : ne jamais renvoyer la transaction d'un autre agrégateur
+                throw new \Exception('IDEMPOTENCY_KEY_CONFLICT');
+            }
             if ($existing) {
                 return [
                     'transaction' => $existing,
@@ -174,14 +178,85 @@ dispatch(new SendPaymentNotificationJob(
         string                      $reason
     ): Transaction|RealTransaction {
 
-        $successStatus = $transaction instanceof Transaction ? 'SUCCESS' : 'success';
-        if ($transaction->status !== $successStatus) throw new \Exception('TRANSACTION_NOT_REFUNDABLE');
+        $isSandbox     = $transaction instanceof Transaction;
+        $conn          = $isSandbox ? 'mysql_sandbox' : 'mysql_money';
+        $table         = $isSandbox ? 'api_transactions' : 'transactions';
+        $successStatus = $isSandbox ? 'SUCCESS' : 'success';
+
         if ($amount > $transaction->amount) throw new \Exception('REFUND_AMOUNT_EXCEEDS_ORIGINAL');
 
-        $transaction->update([
-            'status'         => $transaction instanceof Transaction ? 'REFUNDED' : 'refunded',
-            'failure_reason' => $reason,
-        ]);
+        // Règle : le client récupère $amount, débité du wallet de l'agrégateur.
+        // La commission Many reste acquise. Un seul remboursement par transaction.
+        DB::connection($conn)->transaction(function () use ($transaction, $amount, $reason, $isSandbox, $conn, $table, $successStatus) {
+
+            $current = DB::connection($conn)->table($table)
+                         ->where('id', $transaction->id)
+                         ->lockForUpdate()
+                         ->first();
+
+            if (!$current || $current->status !== $successStatus) {
+                throw new \Exception('TRANSACTION_NOT_REFUNDABLE');
+            }
+
+            $aggregatorUserId = Aggregator::on($conn)->find($transaction->aggregator_id)?->user_id;
+
+            $aggregatorWallet = $aggregatorUserId
+                ? DB::connection($conn)->table('wallets')
+                    ->where('user_id', $aggregatorUserId)
+                    ->where('status', 'active')
+                    ->lockForUpdate()
+                    ->first()
+                : null;
+
+            if (!$aggregatorWallet || $aggregatorWallet->balance < $amount) {
+                throw new \Exception('AGGREGATOR_INSUFFICIENT_FUNDS');
+            }
+
+            // Client : sender_id en production, recherche par téléphone en sandbox
+            $customerId = $isSandbox
+                ? DB::connection($conn)->table('users')
+                    ->whereRaw("REPLACE(phone, ' ', '') = ?", [str_replace(' ', '', $transaction->customer_phone)])
+                    ->value('id')
+                : $transaction->sender_id;
+
+            $customerWallet = $customerId
+                ? DB::connection($conn)->table('wallets')
+                    ->where('user_id', $customerId)
+                    ->where('status', 'active')
+                    ->lockForUpdate()
+                    ->first()
+                : null;
+
+            // En production, l'argent doit arriver quelque part
+            if (!$customerWallet && !$isSandbox) {
+                throw new \Exception('CUSTOMER_WALLET_NOT_FOUND');
+            }
+
+            $move = fn (int $userId, string $sign) => DB::connection($conn)->table('wallets')
+                ->where('user_id', $userId)
+                ->update([
+                    'balance'             => DB::raw("balance {$sign} " . $amount),
+                    'last_transaction_at' => now(),
+                    'version'             => DB::raw('version + 1'),
+                    'updated_at'          => now(),
+                ]);
+
+            $move((int) $aggregatorUserId, '-');
+            if ($customerWallet) {
+                $move((int) $customerId, '+');
+            }
+
+            $transaction->update([
+                'status'         => $isSandbox ? 'REFUNDED' : 'refunded',
+                'failure_reason' => $reason,
+            ]);
+        });
+
+        try {
+            dispatch(new SendWebhookJob($transaction, 'transaction.refunded'))->onConnection($conn);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Webhook refund non envoyé : ' . $e->getMessage());
+        }
 
         return $transaction;
     }

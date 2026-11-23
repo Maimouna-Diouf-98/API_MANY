@@ -128,6 +128,18 @@ class ProcessTransactionJob implements ShouldQueue
             $isSuccess = false;
             DB::connection('mysql_money')->transaction(function () use (&$isSuccess) {
 
+                // Verrou sur la transaction : deux confirmations simultanées (double clic,
+                // retry de l'app) ne doivent jamais débiter le client deux fois.
+                $current = DB::connection('mysql_money')
+                             ->table('transactions')
+                             ->where('id', $this->transaction->id)
+                             ->lockForUpdate()
+                             ->first();
+
+                if (!$current || $current->status !== 'pending') {
+                    return;
+                }
+
                 $customerWallet = DB::connection('mysql_money')
                                     ->table('wallets')
                                     ->where('user_id', $this->transaction->sender_id)
@@ -150,18 +162,23 @@ class ProcessTransactionJob implements ShouldQueue
                       'updated_at'          => now(),
                   ]);
 
-                // Créditer l'agrégateur
-if ($this->aggregator->user_id) {
-    DB::connection('mysql_money')
-      ->table('wallets')
-      ->where('user_id', $this->aggregator->user_id)
-      ->update([
-          'balance'             => DB::raw('balance + ' . $this->transaction->net_to_aggregator), // ← corrigé
-          'last_transaction_at' => now(),
-          'version'             => DB::raw('version + 1'),
-          'updated_at'          => now(),
-      ]);
-}
+                // Créditer l'agrégateur : sans wallet à créditer, on annule tout
+                // (sinon le client serait débité sans que personne ne soit crédité).
+                $credited = $this->aggregator->user_id
+                    ? DB::connection('mysql_money')
+                        ->table('wallets')
+                        ->where('user_id', $this->aggregator->user_id)
+                        ->update([
+                            'balance'             => DB::raw('balance + ' . $this->transaction->net_to_aggregator),
+                            'last_transaction_at' => now(),
+                            'version'             => DB::raw('version + 1'),
+                            'updated_at'          => now(),
+                        ])
+                    : 0;
+
+                if (!$credited) {
+                    throw new \RuntimeException('AGGREGATOR_WALLET_NOT_FOUND');
+                }
 
                 $adminWallet = DB::connection('mysql_money')
                                  ->table('admin_wallets')

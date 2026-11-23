@@ -51,8 +51,11 @@ Route::prefix('v1')->middleware(['resolve.env', 'verify.bearer', 'verify.hmac'])
 
 });
 // Public — appelé par l'app mobile money
+// Sans authentification : limités par IP (le PIN ne doit pas pouvoir être deviné par essais)
 Route::get('/v1/transactions/pending/{phone}',
-    [\App\Http\Controllers\Api\V1\TransactionController::class, 'pendingForCustomer']);
+    [\App\Http\Controllers\Api\V1\TransactionController::class, 'pendingForCustomer'])
+    ->middleware('throttle:60,1');
 
 Route::post('/v1/transactions/{transactionId}/confirm',
-    [\App\Http\Controllers\Api\V1\TransactionController::class, 'confirm']);
+    [\App\Http\Controllers\Api\V1\TransactionController::class, 'confirm'])
+    ->middleware('throttle:10,1');
